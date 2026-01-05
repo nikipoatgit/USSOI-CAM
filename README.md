@@ -9,6 +9,7 @@
 - Ability to Change UART Tunnel IP/URL
 - Support for Multiple BT Modules (1-3)
 - P2P Connection Support (via NAT Traversal)
+- Latest Mission Planner now supports WebSocket connections; WS Forward will be integrated at the earliest 
 
 #
  ![ussoiUseExample](doc/ussoiUseExample.png)
@@ -18,10 +19,7 @@
 - [System Architecture](#system-architecture)
 - [App Features](#app-features)
 - [API Endpoints](#-api-endpoints)
-  - [Streaming API](#1-streaming-api-wsipstreaming)
-  - [Control API](#2-control-api-wsipcontrolapi)
-  - [Telemetry API](#3-telemetry-api-wsiptelemetry)
-- [Getting Started](#get_started )
+- [Getting Started](#get-started )
 ---
 
 ##  System Architecture
