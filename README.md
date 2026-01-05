@@ -11,6 +11,10 @@
 - P2P Connection Support (via NAT Traversal)
 - Latest Mission Planner now supports WebSocket connections; WS Forward will be integrated at the earliest 
 
+### Purpose
+- USSOI-CAM provides an affordable alternative to dedicated digital camera and telemetry systems. It enables live camera feed and telemetry forwarding from Android devices to a ground server, delivering the core functionality required for lightweight UAS/CAM deployments.` This project prioritizes cost-effectiveness and simplicity  `.it may not include all features available in commercial products. See the documentation for known limitations and configuration options.
+
+
 #
  ![ussoiUseExample](doc/ussoiUseExample.png)
 
