@@ -1,46 +1,48 @@
-# Software Architecture
+# Documentation
 
-## 1. High-Level Overview
-USSOI-CAM is a native Android application designed to bridge drone hardware with a Ground Station (GS) over the internet. The app uses a **Foreground Service** architecture to ensure persistent telemetry and video transmission even when the screen is locked or the app is minimized.
 
-## 2. Core Components
+### 📑 Table of Contents
+- [Execution Pipeline](#execution-pipeline)
+- [Code Architecture](#code-architecture)
+    - [MainActivity](#mainactivity)
+- [Key Methods](#key-methods)
 
-### A. UI Layer (`/app/src/main/java/com/ussoi/ui`)
-* **LoginActivity**: Handles user authentication with the Ground Station. Obtains the `sessionKey` via HTTP POST.
-* **MainActivity**: The dashboard showing connection status, current IP, and control buttons (Start/Stop Stream).
-* **CameraPreview**: Renders the local camera view using Android `Camera2` API or `SurfaceView`.
+---
 
-### B. Service Layer (`/app/src/main/java/com/ussoi/service`)
-* **UssoiBackgroundService**: The heart of the application.
-    * **Responsibility**: Manages the WebSocket connection, polls GPS/Battery sensors, and keeps the CPU awake.
-    * **Lifecycle**: Started as a *Foreground Service* with a persistent notification.
 
-### C. Network Layer
-* **WebSocketClient**: Manages the persistent connection to `ws://<host>`.
-* **TelemetryEncoder**: Converts Java objects (Battery, GPS) into the custom Little-Endian binary format required by the GS.
-* **VideoStreamer**: Captures frames from the camera and pipes them to the socket (or UDP stream).
+## Execution Pipeline
 
-## 3. Data Flow
+The application follows a strict initialization sequence to ensure hardware and network resources are managed correctly.
 
-### Telemetry Loop (Every 5 seconds)
-1.  **Sensors**: App queries `LocationManager` for Lat/Lon and `BatteryManager` for voltage/current.
-2.  **Encoding**: Data is passed to the `TelemetryEncoder`.
-    * *Note:* Floats and Integers are converted to Little Endian hex strings.
-3.  **Transport**: The hex string is wrapped in a JSON object (`{"type":"clientStats", "hex":...}`) and sent via WebSocket.
+```mermaid
+graph TD
+    %% Nodes
+    Step1(<b>1. MainActivity</b><br/><i>Initialization</i><br/>Checks Perms & Inits Logging)
+    Step2(<b>2. ServiceManager</b><br/><i>Background Persistence</i><br/>Starts Foreground Service)
+    Step3{<b>3. AuthLogin</b><br/><i>Authentication</i><br/>HTTP POST to Ground Station}
+    Step4(<b>4. ConnManager</b><br/><i>Network Link</i><br/>Establishes WebSocket)
+    Step5(<b>5. Message Loop</b><br/><i>Continuous Cycle</i><br/>Input → Dispatch → Action)
 
-### Video Pipeline
-1.  **Capture**: Camera hardware captures YUV/Surface texture.
-2.  **Encode**: MediaCodec compresses stream (H.264).
-3.  **Transmission**: NAL units are packetized and sent to the Ground Station.
+    %% Flow
+    Step1 -->|User Clicks Start| Step2
+    Step2 --> Step3
+    Step3 -- Failed --> Fail[Notify User & Retry]
+    Step3 -- Success: sessionKey --> Step4
+    Step4 -->|Init Router| Step5
 
-## 4. Key Classes & Responsibilities
+    %% Styling (Optional)
+    style Step1 fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style Step2 fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style Step3 fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
+    style Step4 fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style Step5 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
 
-| Class Name | Responsibility |
-| :--- | :--- |
-| `TelemetryManager` | Aggregates sensor data from Android APIs. |
-| `HexUtil` | Helper class for Little-Endian byte conversion. |
-| `SocketHandler` | Singleton wrapper for the WebSocket connection state. |
-| `PermissionManager` | Handles runtime permissions (Camera, Location, FG Service). |
+```
 
-## 5. Security & Auth
-* **Session Handshake**: The app never stores the password. It sends credentials once to `/authentication` and holds the returned `sessionKey` in memory for the WebSocket handshake.
+
+
+
+## Code Architecture
+
+
+---

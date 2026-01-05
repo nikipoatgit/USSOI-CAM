@@ -12,7 +12,7 @@
 - Latest Mission Planner now supports WebSocket connections; WS Forward will be integrated at the earliest 
 
 ### Purpose
-- USSOI-CAM provides an affordable alternative to dedicated digital camera and telemetry systems. It enables live camera feed and telemetry forwarding from Android devices to a ground server, delivering the core functionality required for lightweight UAS/CAM deployments.` This project prioritizes cost-effectiveness and simplicity  `.it may not include all features available in commercial products. See the documentation for known limitations and configuration options.
+- USSOI-CAM provides an affordable alternative to dedicated digital camera and telemetry systems. It enables live camera feed and telemetry forwarding from Android devices to  ground server, delivering the core functionality required for lightweight UAS/CAM deployments.` This project prioritizes cost-effectiveness and simplicity  `.it may not include all features available in commercial products. See the documentation for known limitations and configuration options.
 
 
 #
@@ -119,7 +119,7 @@ Status (byte 58)
 
 see [Documentation](https://github.com/nikipoatgit/USSOI-CAM/wiki) for more details
 
----
+
 ## Get Started 
   * Install Application From [Release](https://github.com/nikipoatgit/USSOI-CAM/releases/) or Clone repo in Android Studios Code : `https://github.com/nikipoatgit/USSOI-CAM.git`
   * Select Buttons according to use Case :
