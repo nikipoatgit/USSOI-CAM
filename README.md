@@ -36,7 +36,6 @@
 ## API Endpoints
 
 HTTP
-
 - Endpoint: `http://<host>/authentication`
 - Method: `POST`
 - Description: Client login — returns a long-lived `sessionKey` required for WebSocket connections.
@@ -47,7 +46,7 @@ HTTP
 ```
 
 WebSocket
-
+- Endpoint: `ws://<host>/uartunnel>` for UART Tunnel
 - Endpoint: `ws://<host>/control/client?sessionKey=<sessionKey>`
 - Description: Connect using the `sessionKey` query parameter (alternatively send the `sessionKey` as the first message after connecting).
 - After connecting the client sends periodic telemetry messages (every 5 seconds).
