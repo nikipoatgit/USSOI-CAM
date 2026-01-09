@@ -5,14 +5,11 @@ import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.KEY_BAUD_RAT
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.KEY_Session_KEY;
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.UAR_TUNNEL;
 
-import android.app.PendingIntent;
 import android.content.Context;
-import android.content.Intent;
 import android.content.SharedPreferences;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -23,12 +20,11 @@ import com.github.nikipo.ussoi.MacroServices.WebSocketHandler;
 import com.github.nikipo.ussoi.MacroServices.SaveInputFields;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
-import com.hoho.android.usbserial.driver.UsbSerialProber;
+
 
 
 import java.io.IOException;
-import java.util.List;
-import java.util.logging.Logger;
+
 
 public class UsbHandler {
     private static final String TAG = "UsbHandler";
@@ -39,12 +35,7 @@ public class UsbHandler {
     private WebSocketHandler webSocketHandler;
     private Thread readThread;
     private volatile boolean reading = false;
-    private volatile boolean wantReconnect = false;
-    private volatile boolean reconnecting = false;
-    private static final int RECONNECT_DELAY_MS = 1500;
-    private int selectedVid = -1;
-    private int selectedPid = -1;
-
+    private final Object usbLock = new Object();
     private Context context;
     private Logging logging;
     private UsbSerialDriver driver ;
@@ -64,7 +55,6 @@ public class UsbHandler {
         new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(context, message, Toast.LENGTH_SHORT).show());
     }
     public void setupConnection(){
-        wantReconnect = true;
         saveInputFields = SaveInputFields.getInstance(context);
         logging = Logging.getIfInitialized();
         prefs = saveInputFields.get_shared_pref();
@@ -74,6 +64,7 @@ public class UsbHandler {
             Log.w(TAG, " driver id null");
             logging.log(TAG + " driver id null");
             showToast( "driver id null");
+
             return;
         }
 
@@ -148,12 +139,13 @@ public class UsbHandler {
             @Override
             public void onPayloadReceivedByte(byte[] mavlinkBytes) {
                 try {
-                    synchronized (port) {
-                        port.write(mavlinkBytes, timeOut);
+                    synchronized (usbLock) {
+                        if (port != null) {
+                            port.write(mavlinkBytes, timeOut);
+                        }
                     }
                 } catch (IOException e) {
-                    stopAllServices();
-                    scheduleReconnect();
+               //     stopAllServices();
                     Log.e(TAG, "Error writing to USB port from WebSocket", e);
                     logging.log(TAG + " Error writing to USB port from WebSocket"+ e);
                 }
@@ -181,8 +173,6 @@ public class UsbHandler {
     public void setDriver(UsbSerialDriver d) {
         this.driver = d;
         UsbDevice dev = d.getDevice();
-        selectedVid = dev.getVendorId();
-        selectedPid = dev.getProductId();
     }
     public void clearDriver() {
         this.driver = null;
@@ -201,14 +191,14 @@ public class UsbHandler {
 
             while (reading) {
                 try {
+                    if (port == null) break;
                     int len = port.read(buffer, READ_WAIT_MILLIS);
                     if (len > 0) {
                         byte[] mavlinkBytes = java.util.Arrays.copyOf(buffer, len);
                         webSocketHandler.connSendPayloadBytes(mavlinkBytes);
                     }
                 } catch (IOException e) {
-                    stopAllServices();
-                    scheduleReconnect();
+                //    stopAllServices();
                     logging.log(TAG + " Error Reading to USB port from WebSocket"+ e);
                     break;
 
@@ -217,56 +207,6 @@ public class UsbHandler {
             reading = false;
         }, "UsbReadLoop");
         readThread.start();
-    }
-
-    private void scheduleReconnect() {
-        if (!wantReconnect || reconnecting) return;
-
-        reconnecting = true;
-
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            reconnecting = false;
-            tryReconnect();
-        }, RECONNECT_DELAY_MS);
-    }
-    private void tryReconnect() {
-        if (!wantReconnect) return;
-
-        List<UsbSerialDriver> drivers =
-                UsbSerialProber.getDefaultProber()
-                        .findAllDrivers(usbManager);
-
-        if (drivers.isEmpty()) {
-            scheduleReconnect(); // device not back yet
-            return;
-        }
-
-        UsbSerialDriver matched = null;
-
-        for (UsbSerialDriver d : drivers) {
-            UsbDevice dev = d.getDevice();
-            if (dev.getVendorId() == selectedVid &&
-                    dev.getProductId() == selectedPid) {
-                matched = d;
-                break;
-            }
-        }
-
-        if (matched == null) {
-            scheduleReconnect(); // original device not back yet
-            return;
-        }
-
-        UsbDevice device = matched.getDevice();
-
-        if (!usbManager.hasPermission(device)) {
-            wantReconnect = false;
-            logging.log(TAG + " USB permission lost, reconnect disabled");
-            return;
-        }
-
-        setDriver(matched);
-        setupConnection();
     }
 
 
@@ -280,17 +220,23 @@ public class UsbHandler {
     public void stopAllServices(){
         logging.log(TAG + " USB services Stopped");
         stopReading();
-        if (port != null) {
-            try { port.close(); } catch (IOException ignored) {}
-            port = null;
-        }
 
-        clearDriver();
+        // here closing order matters
         if (webSocketHandler != null ) {
             webSocketHandler.closeConnection();
             webSocketHandler = null;
             Log.d(TAG,"socket closed");
 
         }
+
+            if (port != null) {
+                try {
+                    port.close();
+                    Log.d(TAG,"port closed");
+                } catch (IOException ignored) {}
+                port = null;
+            }
+
+
     }
 }

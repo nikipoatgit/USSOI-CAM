@@ -116,7 +116,7 @@ public class ServiceManager extends Service implements LifecycleOwner{
             @Override
             public void onFailure(String error) {
                 Log.e(TAG, "Login Failed: " + error);
-                logger.log(TAG + ": Login Failed");
+                logger.log(TAG + ": Login Failed " + error);
                 loginStatusFlag = false;
                 new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
                         android.widget.Toast.makeText(

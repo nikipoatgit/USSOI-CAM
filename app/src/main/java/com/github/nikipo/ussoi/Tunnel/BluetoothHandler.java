@@ -34,9 +34,6 @@ public class BluetoothHandler {
     private WebSocketHandler webSocketHandler;
     private SaveInputFields saveInputFields;
     private boolean isRunning = false;
-    private volatile boolean wantReconnect = false;
-    private volatile boolean reconnecting = false;
-    private static final int RECONNECT_DELAY_MS = 1500;
 
     private BluetoothHandler(Context context){
         this.context = context.getApplicationContext();
@@ -55,19 +52,8 @@ public class BluetoothHandler {
     public void setDevice(BluetoothDevice device){
         this.device = device;
     }
-    private void scheduleReconnect() {
-        if (!wantReconnect || reconnecting) return;
-
-        reconnecting = true;
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            reconnecting = false;
-            connectToDevice(device);
-        }, RECONNECT_DELAY_MS);
-    }
-
     public void setupConnection(){
         isRunning = true;
-        wantReconnect = true;
 
         if(device == null) return;
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
@@ -100,11 +86,7 @@ public class BluetoothHandler {
             }
             @Override
             public void onPayloadReceivedByte(byte[] mavlinkBytes) {
-                boolean success = SendReceive.getInstance().send(mavlinkBytes);
-                if (!success) {
-                    stopAllServices();
-                    scheduleReconnect();
-                }
+                SendReceive.getInstance().send(mavlinkBytes);
             }
             @Override
             public void onClosed() {
@@ -132,16 +114,21 @@ public class BluetoothHandler {
                                 break;
                             case Connection.CONNECTED:
                                 Log.d(TAG, "Connected successfully");
-                                if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
-                                        != PackageManager.PERMISSION_GRANTED) return;
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    if (ActivityCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.BLUETOOTH_CONNECT
+                                    ) != PackageManager.PERMISSION_GRANTED) {
+                                        return;
+                                    }
+                                }
+
                                 showToast("Connected to " + device.getName());
                                 setupBluetoothListener();
                                 break;
                             case Connection.DISCONNECTED:
                                 Log.d(TAG, "Disconnected");
                                 stopAllServices();
-                                wantReconnect = true;
-                                scheduleReconnect();
                                 break;
 
                         }
@@ -168,7 +155,6 @@ public class BluetoothHandler {
             }
             @Override
             public void onReceived(String data, byte[] mavlinkBytes) {
-                Log.d(TAG, "RX :" + mavlinkBytes.length);
                 webSocketHandler.connSendPayloadBytes(mavlinkBytes);
             }
         };
@@ -180,7 +166,6 @@ public class BluetoothHandler {
         return isRunning;
     }
     public void stopAllServices() {
-        wantReconnect = false;
         device = null;
         stopByUser();
     }

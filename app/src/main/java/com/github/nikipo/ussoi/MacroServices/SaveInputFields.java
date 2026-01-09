@@ -12,14 +12,14 @@ public class SaveInputFields {
 
     // --- General Preferences ---
     static final String PREFS_NAME              = "UsbAppPrefs";
-    public static final String USSOI_version              = "2.0.0";
+    public static final String USSOI_version  = "2.0.1";
     public static final String PREF_LOG_URI = "LOG_FOLDER_URI";
 
     // --- Network & Connectivity ---
     public static final String KEY_url          = "ip";
     public static final String KEY_api_path     = "control/client";
     public static final String streamingUrl     = "mse/client";
-    public static final String UAR_TUNNEL = "uart_tunnel";
+    public static final String UAR_TUNNEL = "ws/uartunnel?mode=fc";
     public static final String KEY_turn_array   = "turnArray";
 
     // --- Feature Toggles (Switches) ---

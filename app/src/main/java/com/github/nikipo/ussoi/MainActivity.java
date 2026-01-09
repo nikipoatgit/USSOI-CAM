@@ -4,6 +4,7 @@ import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.KEY_BT_SWITC
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.KEY_url;
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.KEY_USB_Switch;
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.PREF_LOG_URI;
+import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.USSOI_version;
 
 import android.Manifest;
 import android.app.ActivityManager;
@@ -47,6 +48,7 @@ import androidx.media3.common.util.UnstableApi;
 
 import com.github.nikipo.ussoi.MacroServices.Logging;
 import com.github.nikipo.ussoi.MacroServices.SaveInputFields;
+import com.github.nikipo.ussoi.MacroServices.UsbAttachReceiver;
 import com.github.nikipo.ussoi.Tunnel.BluetoothHandler;
 import com.github.nikipo.ussoi.Tunnel.UsbHandler;
 import com.google.android.material.button.MaterialButton;
@@ -54,6 +56,12 @@ import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
 
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -63,7 +71,6 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
     private static final String ACTION_USB_PERMISSION = "com.example.ussoi.USB_PERMISSION";
-    public static final String ACTION_BT_FAILED = "com.example.ussoi.ACTION_BT_FAILED";
     private static final String MASK = "••••••••";
     private static final int REQ_PICK_LOG_FOLDER = 9001;
 
@@ -77,7 +84,7 @@ public class MainActivity extends AppCompatActivity {
     private ActivityResultLauncher<Intent> pickLogFolderLauncher;
 
     // UI Components
-    private TextView usbInfoText;
+    private TextView usbInfoText ,versionTextField;
     private EditText urlIp, roomId, roomPwd;
     private Button serviceButton;
     private MaterialButton radioUsb, radioBt;
@@ -142,6 +149,8 @@ public class MainActivity extends AppCompatActivity {
 
         checkExistingUsbDevices();
         checkAndRequestRuntimePermissions();
+
+        new Thread(this::checkLatestVersion).start();
     }
 
     @OptIn(markerClass = UnstableApi.class)
@@ -154,6 +163,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         super.onStop();
+        try { unregisterReceiver(usbPermissionReceiver); } catch (Exception ignored) { logging.log(TAG+" usbReceiver was not registered");}
         try { unregisterReceiver(usbReceiver); } catch (Exception ignored) { logging.log(TAG+" usbReceiver was not registered");}
         try { unregisterReceiver(btFailReceiver); } catch (Exception ignored) {logging.log(TAG + " btFailReceiver was not registered");}
     }
@@ -170,6 +180,7 @@ public class MainActivity extends AppCompatActivity {
         radioBt = findViewById(R.id.btnBt);
         connectionToggleGroup = findViewById(R.id.connectionToggle);
         btnKeepScreenOn = findViewById(R.id.btnKeepScreenOn);
+        versionTextField = findViewById(R.id.versionText);
     }
 
     @OptIn(markerClass = UnstableApi.class)
@@ -271,6 +282,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectUSBDriverThenStart() {
+
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
 
         List<UsbSerialDriver> drivers =
@@ -303,6 +315,7 @@ public class MainActivity extends AppCompatActivity {
 
                     if (!usbManager.hasPermission(device)) {
                         requestUsbPermission(device);
+
                     } else {
                         startMainService();
                     }
@@ -310,8 +323,29 @@ public class MainActivity extends AppCompatActivity {
                 .setCancelable(true)
                 .setNegativeButton("Cancel", (dialog, which) -> {
                     usbHandler.clearDriver();
-                });
+                })
+                .show();
     }
+    private final BroadcastReceiver usbPermissionReceiver =
+            new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+
+                    if (!ACTION_USB_PERMISSION.equals(intent.getAction())) return;
+
+                    UsbDevice device =
+                            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+
+                    boolean granted =
+                            intent.getBooleanExtra(
+                                    UsbManager.EXTRA_PERMISSION_GRANTED, false);
+
+                    if (granted && device != null) {
+                        updateUsbInfoUi(device);
+                        startMainService();
+                    }
+                }
+            };
 
     @OptIn(markerClass = UnstableApi.class)
     private void startMainService() {
@@ -484,43 +518,85 @@ public class MainActivity extends AppCompatActivity {
     // --- Broadcast Receivers ---
 
     private void registerBroadcastReceivers() {
-        IntentFilter usbFilter = new IntentFilter();
-        usbFilter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
-        usbFilter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
-        registerReceiver(usbReceiver, usbFilter);
+
+        // USB attach/detach events
+        IntentFilter usbEventFilter = new IntentFilter();
+        usbEventFilter.addAction(UsbAttachReceiver.ACTION_USB_EVENT);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(
+                    usbReceiver,
+                    usbEventFilter,
+                    Context.RECEIVER_NOT_EXPORTED
+            );
+        } else {
+            registerReceiver(usbReceiver, usbEventFilter);
+        }
+
+        // USB permission result
+        IntentFilter usbPermissionFilter =
+                new IntentFilter(ACTION_USB_PERMISSION);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(
+                    usbPermissionReceiver,
+                    usbPermissionFilter,
+                    Context.RECEIVER_NOT_EXPORTED
+            );
+        } else {
+            registerReceiver(usbPermissionReceiver, usbPermissionFilter);
+        }
     }
+
 
 
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
+            String action = intent.getStringExtra("action");
+            UsbDevice device =
+                    intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+
+            if (device == null || action == null) return;
 
             if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
-                UsbDevice device =
-                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-
-                if (device == null) return;
-
-                String info =
-                        "USB Detected\n" +
-                                "Name: " + device.getDeviceName() + "\n" +
-                                "Vendor ID: " + device.getVendorId() + "\n" +
-                                "Product ID: " + device.getProductId() + "\n" +
-                                "Class: " + device.getDeviceClass() + "\n" +
-                                "SubClass: " + device.getDeviceSubclass() + "\n" +
-                                "Protocol: " + device.getDeviceProtocol() + "\n" +
-                                "Interfaces: " + device.getInterfaceCount();
-
-                usbInfoText.setText(info);
-                logging.log(TAG + " USB detected (no permission requested)");
+                updateUsbInfoUi(device);
+                logging.log(TAG + " USB attached");
             }
-
             else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
+
                 usbInfoText.setText("USB device disconnected");
+                logging.log(TAG + " USB detached");
             }
         }
     };
+
+    private void updateUsbInfoUi(UsbDevice device) {
+
+        String m = " ", p = " ", s = " ";
+
+        if (usbManager.hasPermission(device)) {
+            s = device.getSerialNumber();
+            m = device.getManufacturerName();
+            p = device.getProductName();
+        }
+
+        String info =
+                "Path: " + device.getDeviceName() + "\n" +
+                        "VID : " +
+                        Integer.toHexString(device.getVendorId()) + "   PID : " +
+                        Integer.toHexString(device.getProductId()) + "\n" +
+                        "USB: C/S/P = " +
+                        device.getDeviceClass() + "/" +
+                        device.getDeviceSubclass() + "/" +
+                        device.getDeviceProtocol() +
+                        " | IF=" + device.getInterfaceCount() + "\n" +
+                        "Mfg: " + m + "\n" +
+                        "Prod: " + p + "\n" +
+                        "SN: " + s;
+
+        usbInfoText.setText(info);
+    }
 
     private final BroadcastReceiver btFailReceiver = new BroadcastReceiver() {
         @Override
@@ -625,7 +701,7 @@ public class MainActivity extends AppCompatActivity {
                 .setNegativeButton("Close App", (d, w) -> {
                     d.dismiss();
                     finishAffinity();
-                    // TODO : when i manually remove permission of external folder the app crashes
+                    // TODO : when i manually remove permission of external folder from settings the app crashes
                 })
                 .show();
     }
@@ -662,6 +738,78 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void checkLatestVersion() {
+        HttpURLConnection conn = null;
+
+        try {
+
+            String currentVersion = USSOI_version;
+
+            URL url = new URL(
+                    "https://api.github.com/repos/nikipoatgit/USSOI-CAM/releases/latest"
+            );
+
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+
+            BufferedReader br = new BufferedReader(
+                    new InputStreamReader(conn.getInputStream())
+            );
+
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) {
+                sb.append(line);
+            }
+
+            br.close();
+
+            JSONObject json = new JSONObject(sb.toString());
+            String latestVersion =
+                    json.getString("tag_name").replace("v", "").trim();
+
+            boolean updateAvailable =
+                    isNewerVersion(latestVersion, currentVersion);
+
+
+            runOnUiThread(() -> {
+                if (updateAvailable) {
+                    versionTextField.setText(
+                            "Update available: v" + latestVersion
+                    );
+                } else {
+                    versionTextField.setText(
+                            "Version: v" + currentVersion
+                    );
+                }
+            });
+
+        } catch (Exception e) {
+            runOnUiThread(() ->
+                    versionTextField.setText("Version check failed")
+            );
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+    private boolean isNewerVersion(String latest, String current) {
+        String[] l = latest.split("\\.");
+        String[] c = current.split("\\.");
+
+        int len = Math.max(l.length, c.length);
+
+        for (int i = 0; i < len; i++) {
+            int lv = i < l.length ? Integer.parseInt(l[i]) : 0;
+            int cv = i < c.length ? Integer.parseInt(c[i]) : 0;
+
+            if (lv > cv) return true;
+            if (lv < cv) return false;
+        }
+        return false;
+    }
 
 
 }
+

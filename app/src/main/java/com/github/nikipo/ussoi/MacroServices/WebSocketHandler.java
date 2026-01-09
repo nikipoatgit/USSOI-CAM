@@ -111,8 +111,6 @@ public class WebSocketHandler {
             @Override
             public void onMessage(@NonNull WebSocket webSocket, @NonNull ByteString bytes) {
                 byte[] byteArray = bytes.toByteArray();
-                Log.d(TAG, "Received " + byteArray.length + " bytes.");
-                // Switch to Main Thread for callback
                 mainHandler.post(() -> callback.onPayloadReceivedByte(byteArray));
             }
 

@@ -19,4 +19,6 @@
     <string name="room_pwd">Room PWD</string>
     <string name="room_id">Room Id</string>
     <string name="keep_screen_on">Keep Screen ON</string>
+    <string name="arigato">arigato</string>
+    <string name="version">Version</string>
 </resources>
