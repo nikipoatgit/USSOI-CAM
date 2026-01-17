@@ -170,7 +170,7 @@ public class BluetoothHandler {
         stopByUser();
     }
 
-    public void stopByUser() {
+    private void stopByUser() {
         isRunning = false;
         if (connection.isConnected()) {
             connection.disconnect();

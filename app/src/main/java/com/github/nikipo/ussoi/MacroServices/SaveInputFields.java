@@ -68,7 +68,7 @@ public class SaveInputFields {
     public void saveCredentials(String roomId,String roomPwd) {
         prefs.edit()
                 .putString(KEY_RoomID, roomId)
-                .putString(KEY_RoomPWD, roomId)
+                .putString(KEY_RoomPWD, roomPwd)
                 .apply();
     }
     public SharedPreferences get_shared_pref(){ // returns obj obj of shared prefs

@@ -24,7 +24,6 @@ import okio.ByteString;
 
 public class WebSocketHandler {
     private static final String TAG = "ConnHandle";
-    private static final int MAX_RECONNECT_ATTEMPTS = 5;
 
     // Use a Main Looper handler for UI thread callbacks
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -146,20 +145,15 @@ public class WebSocketHandler {
 
     private void initiateReconnect() {
         // Exponential backoff or simple limit
-        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttempts++;
-            long delay = 3000L * reconnectAttempts; // Wait longer each time (3s, 6s, 9s...)
+            long delay = 3000L;
 
             Log.d(TAG, "Reconnecting attempt " + reconnectAttempts + " in " + delay + "ms");
 
             mainHandler.postDelayed(this::connect, delay);
-        } else {
-            Log.e(TAG, "Max reconnection attempts reached.");
-            mainHandler.post(() -> callback.onError("Max reconnection attempts reached"));
-        }
     }
 
-    public static String normalizeUrl(String inputUrl) {
+    private static String normalizeUrl(String inputUrl) {
         if (inputUrl == null || inputUrl.isEmpty()) return "ws://10.0.0.1/";
 
         inputUrl = inputUrl.trim();

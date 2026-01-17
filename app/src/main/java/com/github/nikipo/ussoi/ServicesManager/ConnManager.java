@@ -147,7 +147,7 @@ public class ConnManager {
                         // Build combined status object
                         JSONObject obj = new JSONObject();
                         obj.put("type", "clientStats");
-                        obj.put("hex", clientInfoProvider.ImportantClientInfoConstructor()+ ConnRouter.getClientStat());
+                        obj.put("hex", clientInfoProvider.getClientStats()+ ConnRouter.getClientStat());
 
                         sender.send(obj);
                         Thread.sleep(5000);

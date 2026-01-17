@@ -210,7 +210,7 @@ public class UsbHandler {
     }
 
 
-    public void stopReading() {
+    private void stopReading() {
         reading = false;
         if (readThread != null) {
             try { readThread.join(500); } catch (InterruptedException ignored) {}

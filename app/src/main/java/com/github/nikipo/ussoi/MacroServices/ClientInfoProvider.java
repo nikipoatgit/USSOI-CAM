@@ -208,7 +208,7 @@ public class ClientInfoProvider {
      */
     private int lastCharge_uAh = Integer.MIN_VALUE;
 
-    public String ImportantClientInfoConstructor() {
+    public String getClientStats() {
         try {
             ByteBuffer buffer = ByteBuffer.allocate(58);
             buffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -403,7 +403,7 @@ public class ClientInfoProvider {
         return sb.toString();
     }
 
-    public int getCellularSignalStrengthDbm() {
+    private int getCellularSignalStrengthDbm() {
         final int UNKNOWN_DBM = -127;
 
         if (lastSignalStrength == null) {
@@ -436,12 +436,12 @@ public class ClientInfoProvider {
         return UNKNOWN_DBM;
     }
 
-    public double getAppDataConsumptionMb() {
+    private double getAppDataConsumptionMb() {
         // Convert Bytes to Megabytes
         return (sessionUploadBytes + sessionDownloadBytes) / (1024.0 * 1024.0);
     }
 
-    public byte getThermalStatus() {
+    private byte getThermalStatus() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             return (byte) 0xFF; // Not supported on older APIs
         }
@@ -462,7 +462,7 @@ public class ClientInfoProvider {
     }
 
     private volatile float lastBatteryTempC = 0.0f;
-    public float getBatteryTemperatureLegacy() {
+    private float getBatteryTemperatureLegacy() {
         try {
             Intent intent = context.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
             if (intent == null) return lastBatteryTempC;
