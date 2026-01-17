@@ -19,7 +19,7 @@
  ![ussoiUseExample](doc/ussoiUseExample.png)
 
 ## 📑 Table of Contents
-- [Documentation](https://github.com/nikipoatgit/USSOI-CAM/wiki)
+- [Documentation](https://github.com/nikipoatgit/USSOI-CAM/blob/main/DOCUMENTATION.md)
 - [System Architecture](#system-architecture)
 - [App Features](#app-features)
 - [API Endpoints](#api-endpoints)
@@ -60,7 +60,7 @@ WebSocket
 {"type":"clientStats","hex":"0000320000C841FFABFFE5FF000023B95B4040585B4100889E3B69DB43D5C21F35404BCD1E6805C353409A9959408E66F13DCDCCCCCCCC2474400"}
 ```
 
-see [Documentation](https://github.com/nikipoatgit/USSOI-CAM/wiki) for more details
+see [Documentation](https://github.com/nikipoatgit/USSOI-CAM/blob/main/DOCUMENTATION.md) for more details
 
 
 ## Get Started 
