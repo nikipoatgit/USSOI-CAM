@@ -594,6 +594,57 @@ Error States:
 #### FrameStreamController.java
 Controller for camera streaming and recording operations
 
+```mermaid
+flowchart TB
+    subgraph Camera["Camera Hardware"]
+        Sensor["Image Sensor<br/>(Raw Bayer Data)"]
+        ISP["Image Signal Processor<br/>(Debayer, AWB, AE)"]
+    end
+    
+    subgraph HAL["Camera HAL Layer"]
+        Pipeline["Processing Pipeline"]
+        Scaler["Hardware Scaler<br/>(Multi-Resolution Support)"]
+    end
+    
+    subgraph Surfaces["Surface Targets"]
+        HQ["HQ Surface<br/>1920x1080<br/>5 Mbps"]
+        LQ["LQ Surface<br/>1920x1080<br/>500 Kbps"]
+    end
+    
+    subgraph Encoders["Media Encoders"]
+        LocalRec["LocalRecorder<br/>(MediaRecorder)<br/>H.264 + AAC<br/>→ MP4 File"]
+        StreamEnc["StreamingEncoder<br/>(MediaCodec)<br/>H.264 Only<br/>→ WebSocket"]
+    end
+    
+    subgraph Output["Output Destinations"]
+        File["📁 Local Storage<br/>(SAF - videos/)<br/>High Quality Archive"]
+        Network["🌐 WebSocket Stream<br/>Low Latency Live View"]
+    end
+    
+    Sensor --> ISP
+    ISP --> Pipeline
+    Pipeline --> Scaler
+    
+    Scaler -->|"Stream 1<br/>Full Resolution"| HQ
+    Scaler -->|"Stream 2<br/>Same/Scaled Resolution"| LQ
+    
+    HQ --> LocalRec
+    LQ --> StreamEnc
+    
+    LocalRec --> File
+    StreamEnc --> Network
+    
+    style Camera fill:#e3f2fd
+    style HAL fill:#fff3e0
+    style Surfaces fill:#f3e5f5
+    style Encoders fill:#e8f5e9
+    style Output fill:#fce4ec
+    style Scaler fill:#ff9800,color:#fff
+    style HQ fill:#4caf50,color:#fff
+    style LQ fill:#2196f3,color:#fff
+
+```
+
 **Purpose:**
 - Manages dual-stream video: High Quality (HQ) for recording, Low Quality (LQ) for streaming
 - Handles camera initialization and configuration
