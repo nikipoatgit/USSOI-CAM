@@ -9,6 +9,7 @@
 - Ability to Change UART Tunnel IP/URL
 - Support for Multiple BT Modules (1-3)
 - P2P Connection Support (via NAT Traversal)
+- camers2appi High FPS video Stream
 - Auto Quality Adjustment and Network usage Priority
 
 ### Purpose
