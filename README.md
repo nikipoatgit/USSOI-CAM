@@ -15,6 +15,9 @@
 ### Purpose
 - USSOI-CAM provides an affordable alternative to dedicated digital camera and telemetry systems. It enables live camera feed and telemetry forwarding from Android devices to  ground server, delivering the core functionality required for lightweight UAS/CAM deployments.` This project prioritizes cost-effectiveness and simplicity  `.it may not include all features available in commercial products. See the documentation for known limitations and configuration options.
 
+## The Back Story (why I built this)
+ Digital FPV cameras + radio kits easily run **$150–300** — way too much for pocket money. 
+but a cheap second-hand Android - (Android 7+) around **₹2000–5000** (~$25–45) will do the job with added benifits of : **state-of-the-art camera** (whose full API is usually hidden behind NDAs), built-in GPS, actually-good cellular/WiFi modem, and enough processing power to handle real-time streaming + telemetry forwarding.
 
 #
  ![ussoiUseExample](doc/ussoiUseExample.png)
