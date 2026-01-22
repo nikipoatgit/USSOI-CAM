@@ -1,14 +1,19 @@
 package com.github.nikipo.ussoi.MacroServices;
 
+import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.content.SharedPreferences;
 
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKey;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class SaveInputFields {
     private static SaveInputFields instance;
     private final SharedPreferences prefs;
+    public static List<BluetoothDevice> selectedBtDevices ;
 
     // --- General Preferences ---
     static final String PREFS_NAME              = "UsbAppPrefs";
@@ -61,6 +66,7 @@ public class SaveInputFields {
 
     public static synchronized SaveInputFields getInstance(Context context) {
         if (instance == null) {
+            selectedBtDevices = new ArrayList<>();
             instance = new SaveInputFields(context);
         }
         return instance;

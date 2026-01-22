@@ -5,6 +5,7 @@ import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.KEY_url;
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.KEY_USB_Switch;
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.PREF_LOG_URI;
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.USSOI_version;
+import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.selectedBtDevices;
 
 import android.Manifest;
 import android.app.ActivityManager;
@@ -49,7 +50,6 @@ import androidx.media3.common.util.UnstableApi;
 import com.github.nikipo.ussoi.MacroServices.Logging;
 import com.github.nikipo.ussoi.MacroServices.SaveInputFields;
 import com.github.nikipo.ussoi.MacroServices.UsbAttachReceiver;
-import com.github.nikipo.ussoi.Tunnel.BluetoothHandler;
 import com.github.nikipo.ussoi.Tunnel.UsbHandler;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
@@ -78,7 +78,6 @@ public class MainActivity extends AppCompatActivity {
     private UsbManager usbManager;
     private UsbHandler usbHandler;
     private SaveInputFields saveInputFields;
-    private BluetoothHandler bluetoothHandler;
     private Logging logging;
     private SharedPreferences pref;
     private ActivityResultLauncher<Intent> pickLogFolderLauncher;
@@ -267,7 +266,6 @@ public class MainActivity extends AppCompatActivity {
 
             // Branch based on connection type
             if (radioBt.isChecked()) {
-                bluetoothHandler = BluetoothHandler.getInstance(this);
                 pickBluetoothDeviceThenStart();
             }
             else if (radioUsb.isChecked()) {
@@ -389,8 +387,6 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        if (!hasBluetoothPermissions()) return; // Permission check
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
             if (ActivityCompat.checkSelfPermission(
                     this, Manifest.permission.BLUETOOTH_CONNECT)
@@ -410,17 +406,25 @@ public class MainActivity extends AppCompatActivity {
 
         List<BluetoothDevice> devices = new ArrayList<>(pairedDevices);
         String[] names = new String[devices.size()];
+        boolean[] checked = new boolean[devices.size()];
         for (int i = 0; i < devices.size(); i++) {
             names[i] = devices.get(i).getName() + "\n" + devices.get(i).getAddress();
         }
 
+        selectedBtDevices.clear();
+
         new AlertDialog.Builder(this)
-                .setTitle("Select Bluetooth Device")
-                .setItems(names, (dialog, which) -> {
-                    selectedBtDevice = devices.get(which);
-                    bluetoothHandler.setDevice(selectedBtDevice);
-                    startMainService();
+                .setTitle("Select Bluetooth Devices")
+                .setMultiChoiceItems(names, checked, (d, which, isChecked) -> {
+                    BluetoothDevice dev = devices.get(which);
+                    if (isChecked) {
+                        if (!selectedBtDevices.contains(dev))
+                            selectedBtDevices.add(dev);
+                    } else {
+                        selectedBtDevices.remove(dev);
+                    }
                 })
+                .setPositiveButton("OK", (d, w) -> startMainService())
                 .setNegativeButton("Cancel", null)
                 .show();
     }
@@ -483,12 +487,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private boolean hasBluetoothPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            return ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
-        }
-        return true;
-    }
 
     // --- USB Logic ---
 
