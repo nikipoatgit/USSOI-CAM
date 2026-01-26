@@ -3,7 +3,7 @@ package com.github.nikipo.ussoi.Tunnel;
 
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.KEY_BAUD_RATE;
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.KEY_Session_KEY;
-import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.UAR_TUNNEL;
+import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.UART_TUNNEL;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -160,7 +160,7 @@ public class UsbHandler {
                 Log.e(TAG, "Error : " + error);
             }
         });
-        webSocketHandler.setupConnection(UAR_TUNNEL,prefs.getString(KEY_Session_KEY,"block"));
+        webSocketHandler.setupConnection(UART_TUNNEL,prefs.getString(KEY_Session_KEY,"block"));
         startReading(port);
     }
     private static int usbWriteTimeoutMs(int baud) {

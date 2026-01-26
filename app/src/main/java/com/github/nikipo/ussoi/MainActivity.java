@@ -5,6 +5,7 @@ import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.KEY_url;
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.KEY_USB_Switch;
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.PREF_LOG_URI;
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.USSOI_version;
+import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.btDevices;
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.selectedBtDevices;
 
 import android.Manifest;
@@ -40,6 +41,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
+import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -56,6 +58,8 @@ import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
 
+import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -64,6 +68,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
@@ -424,9 +429,39 @@ public class MainActivity extends AppCompatActivity {
                         selectedBtDevices.remove(dev);
                     }
                 })
-                .setPositiveButton("OK", (d, w) -> startMainService())
+                .setPositiveButton("OK", (d, w) ->{
+                    updateBtDevices();
+                    startMainService();
+                })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    private void updateBtDevices() {
+        JSONArray devicesArr = new JSONArray();
+
+        for (int i = 0; i < selectedBtDevices.size(); i++) {
+            BluetoothDevice d = selectedBtDevices.get(i);
+            JSONObject o = new JSONObject();
+            try {
+                o.put("index", i + 1);
+                o.put("name", d.getName());
+                o.put("mac", d.getAddress());
+            } catch (JSONException ignored) {}
+            devicesArr.put(o);
+        }
+
+        // reset + replace content atomically
+        synchronized (btDevices) {
+            Iterator<String> keys = btDevices.keys();
+            while (keys.hasNext()) {
+                keys.next();
+                keys.remove();
+            }
+            try {
+                btDevices.put("devices", devicesArr);
+            } catch (JSONException ignored) {}
+        }
     }
     private void requestBluetoothConnect() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

@@ -2,14 +2,21 @@ package com.github.nikipo.ussoi.ServicesManager;
 
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.*;
 
+import android.Manifest;
+import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.os.Build;
 import android.util.Log;
 import android.util.Size;
+
+import androidx.annotation.RequiresApi;
+import androidx.core.app.ActivityCompat;
 
 import com.github.nikipo.ussoi.MacroServices.DeviceInfo;
 import com.github.nikipo.ussoi.MacroServices.Logging;
@@ -121,11 +128,20 @@ public class ConnRouter {
                 sendAck("ack", json.optInt("reqId", -1), "");
 
                 break;
+            case "getBtDevices":
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    connManager.send(btDevices);
+                }
+                sendAck("ack", json.optInt("reqId", -1), "");
+                break;
+
             default:
                 sendAck("nack", json.optInt("reqId", -1), "Params Invalid");
                 break;
         }
     }
+
+
 
     private static void handleStreamLogic(JSONObject json) {
         int reqId = json.optInt("reqId", -1);
@@ -237,8 +253,11 @@ public class ConnRouter {
 
     private static void initUartTunnel() {
         if (prefs.getBoolean(KEY_BT_SWITCH, false) && !prefs.getBoolean(KEY_USB_Switch, false)) {
-            bluetoothHandler = BluetoothHandler.getInstance(ctx);
-            bluetoothHandler.setupConnection();
+            bluetoothHandler = new BluetoothHandler(ctx);
+            if (!selectedBtDevices.isEmpty()) {
+                bluetoothHandler.setDevice(selectedBtDevices.get(0));
+                bluetoothHandler.setupConnection();
+            }
         } else if (!prefs.getBoolean(KEY_BT_SWITCH, false) && prefs.getBoolean(KEY_USB_Switch, false)) {
             usbHandler = UsbHandler.getInstance(ctx);
             usbHandler.setupConnection();

@@ -7,14 +7,16 @@ import android.content.SharedPreferences;
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKey;
 
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.List;
 
 public class SaveInputFields {
     private static SaveInputFields instance;
     private final SharedPreferences prefs;
-    public static List<BluetoothDevice> selectedBtDevices ;
-
+    public static final List<BluetoothDevice> selectedBtDevices =  new ArrayList<>();
+    public static final JSONObject btDevices = new JSONObject();
     // --- General Preferences ---
     static final String PREFS_NAME              = "UsbAppPrefs";
     public static final String USSOI_version  = "2.0.1";
@@ -24,7 +26,7 @@ public class SaveInputFields {
     public static final String KEY_url          = "ip";
     public static final String KEY_api_path     = "control/client";
     public static final String streamingUrl     = "mse/client";
-    public static final String UAR_TUNNEL = "ws/uartunnel?mode=fc";
+    public static final String UART_TUNNEL = "ws/uartunnel?mode=fc";
     public static final String KEY_turn_array   = "turnArray";
 
     // --- Feature Toggles (Switches) ---
@@ -66,7 +68,6 @@ public class SaveInputFields {
 
     public static synchronized SaveInputFields getInstance(Context context) {
         if (instance == null) {
-            selectedBtDevices = new ArrayList<>();
             instance = new SaveInputFields(context);
         }
         return instance;

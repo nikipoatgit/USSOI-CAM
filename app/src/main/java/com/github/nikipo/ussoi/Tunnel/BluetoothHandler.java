@@ -1,7 +1,7 @@
 package com.github.nikipo.ussoi.Tunnel;
 
 import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.KEY_Session_KEY;
-import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.UAR_TUNNEL;
+import static com.github.nikipo.ussoi.MacroServices.SaveInputFields.UART_TUNNEL;
 
 import android.Manifest;
 import android.bluetooth.BluetoothAdapter;
@@ -27,7 +27,6 @@ import com.psp.bluetoothlibrary.SendReceive;
 public class BluetoothHandler {
     public static final String ACTION_BT_FAILED = "com.example.ussoi.BT_CONNECTION_FAILED";
     private static final String TAG = "BtHandel";
-    private static BluetoothHandler instance;
     private Context context;
     private BluetoothDevice device;
     private Connection connection;
@@ -35,26 +34,20 @@ public class BluetoothHandler {
     private SaveInputFields saveInputFields;
     private boolean isRunning = false;
 
-    private BluetoothHandler(Context context){
+    public BluetoothHandler(Context context){
         this.context = context.getApplicationContext();
         this.connection = new Connection(this.context);
         this.saveInputFields = SaveInputFields.getInstance(context);
     };
-    public static synchronized BluetoothHandler getInstance(Context context){
-        if (instance == null){
-            instance = new BluetoothHandler(context);
-        }
-        return instance;
-    }
+
     private void showToast(String message) {
         new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(context, message, Toast.LENGTH_SHORT).show());
     }
+
     public void setDevice(BluetoothDevice device){
         this.device = device;
     }
     public void setupConnection(){
-        isRunning = true;
-
         if(device == null) return;
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
         if(adapter == null){
@@ -100,7 +93,8 @@ public class BluetoothHandler {
         });
 
         SharedPreferences prefs = saveInputFields.get_shared_pref();
-        webSocketHandler.setupConnection(UAR_TUNNEL,prefs.getString(KEY_Session_KEY,"block"));
+        webSocketHandler.setupConnection(UART_TUNNEL,prefs.getString(KEY_Session_KEY,"block"));
+        isRunning = true;
     }
     private void connectToDevice(BluetoothDevice device){
         BluetoothListener.onConnectionListener connectionListener =
@@ -172,6 +166,7 @@ public class BluetoothHandler {
 
     private void stopByUser() {
         isRunning = false;
+        SendReceive.getInstance().setOnReceiveListener(null);
         if (connection.isConnected()) {
             connection.disconnect();
         }
