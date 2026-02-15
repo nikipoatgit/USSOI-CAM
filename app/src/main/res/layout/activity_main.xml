@@ -8,7 +8,7 @@
     android:orientation="vertical"
     android:paddingTop="40dp"
     android:paddingHorizontal="10dp"
-    tools:context=".MainActivity">
+    tools:context=".ui.MainActivity">
 
     <include layout="@layout/usb_list_section"/>
 
