@@ -45,6 +45,9 @@ public class SaveInputFields {
     public static final String KEY_RoomPWD      = "roomPwd";
     public static final String KEY_Session_KEY  = "sessionKey";
 
+    // Misc
+    public static final String MASK = "••••••••";
+
 
 
     // Private constructor for singleton

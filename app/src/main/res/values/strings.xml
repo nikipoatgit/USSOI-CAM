@@ -21,4 +21,6 @@
     <string name="keep_screen_on">Keep Screen ON</string>
     <string name="arigato">arigato</string>
     <string name="version">Version</string>
+    <string name="screen_always_on">Screen Always On</string>
+    <string name="timeout_removed">Timeout Removed</string>
 </resources>
