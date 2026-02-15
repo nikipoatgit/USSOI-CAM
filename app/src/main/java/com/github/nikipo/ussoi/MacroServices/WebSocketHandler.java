@@ -35,7 +35,7 @@ public class WebSocketHandler {
     private WebSocket webSocket;
     private boolean isManualClose = false;
     private volatile boolean isConnected = false;
-    private int reconnectAttempts = 0;
+    private long reconnectAttempts = 0;
 
     // Dependencies
     private SharedPreferences prefs;
@@ -144,13 +144,23 @@ public class WebSocketHandler {
     }
 
     private void initiateReconnect() {
-        // Exponential backoff or simple limit
-            reconnectAttempts++;
-            long delay = 3000L;
+        reconnectAttempts++;
+        long delay;
 
-            Log.d(TAG, "Reconnecting attempt " + reconnectAttempts + " in " + delay + "ms");
+        if (reconnectAttempts <= 10) {
+            delay = 1000L;
+        }
+        else if (reconnectAttempts <= 60){
+            long scaledAttempts = reconnectAttempts - 10;
+            delay = 2000L + (1000L * scaledAttempts);
+        }
+        else {
+            delay = 60000L;
+        }
 
-            mainHandler.postDelayed(this::connect, delay);
+        Log.d(TAG, "Reconnecting attempt " + reconnectAttempts + " in " + delay + "ms");
+        logging.log(TAG + "WS Reconnect: " +"Reconnecting attempt " + reconnectAttempts + " in " + delay + "ms");
+        mainHandler.postDelayed(this::connect, delay);
     }
 
     private static String normalizeUrl(String inputUrl) {

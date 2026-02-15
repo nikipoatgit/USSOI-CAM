@@ -95,7 +95,6 @@ public class MainActivity extends AppCompatActivity {
     private MaterialButtonToggleGroup connectionToggleGroup;
 
     // State
-    private BluetoothDevice selectedBtDevice;
     private ActivityResultLauncher<String[]> permissionLauncher;
     private boolean keepScreenOn = false;
     private MaterialButton btnKeepScreenOn;

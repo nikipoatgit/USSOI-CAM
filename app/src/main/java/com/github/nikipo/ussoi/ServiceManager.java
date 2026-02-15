@@ -179,16 +179,3 @@ public class ServiceManager extends Service implements LifecycleOwner{
     }
 }
 
-//// In your Activity or Application class
-//     private Logging logger;
-//       logger = Logging.getInstance(this);
-//
-//// Log a simple message
-//logger.log("Application started successfully");
-//
-//// Log an error (you can overload the log method to accept exceptions if you want)
-//try {
-//        // some code
-//        } catch (Exception e) {
-//        logger.log("Error occurred: " + e.getMessage());
-//        }
