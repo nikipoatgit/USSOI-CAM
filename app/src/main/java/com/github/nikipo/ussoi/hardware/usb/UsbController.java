@@ -23,6 +23,10 @@ public final class UsbController {
         if (devices.isEmpty()) {
             usbInfoText.setText("No USB device connected");
         }
+        else {
+            UsbDevice device = devices.values().iterator().next();
+            updateDeviceInfo(device);
+        }
     }
 
     public void updateDeviceInfo(UsbDevice device) {

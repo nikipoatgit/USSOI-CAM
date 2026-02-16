@@ -20,6 +20,10 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+
+// usage  private Logging logging;
+// logging = Logging.getInstance(this);
+// logging.log("Application Started / Main Activity Created");
 public class Logging {
     private static final String TAG = "Logging";
     private static volatile Logging instance; // volatile for double-checked locking safety

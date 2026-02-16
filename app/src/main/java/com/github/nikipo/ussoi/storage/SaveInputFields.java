@@ -12,7 +12,7 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
 
-public class SaveInputFields {
+public  class SaveInputFields {
     private static SaveInputFields instance;
     private final SharedPreferences prefs;
     public static final List<BluetoothDevice> selectedBtDevices =  new ArrayList<>();

@@ -1,28 +1,25 @@
-package com.github.nikipo.ussoi.storage.logs;
+package com.github.nikipo.ussoi.storage;
 
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.UriPermission;
 import android.net.Uri;
-import android.provider.Settings;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.appcompat.app.AlertDialog;
 import androidx.documentfile.provider.DocumentFile;
 
-import com.github.nikipo.ussoi.storage.SaveInputFields;
-
 import java.util.List;
 
-public final class LogStorageController {
+public final class StorageController {
 
     private final Activity activity;
     private final SaveInputFields saveInputFields;
     private final SharedPreferences pref;
     private final ActivityResultLauncher<Intent> folderPickerLauncher;
 
-    public LogStorageController(
+    public StorageController(
             Activity activity,
             SaveInputFields saveInputFields,
             ActivityResultLauncher<Intent> launcher
@@ -34,28 +31,36 @@ public final class LogStorageController {
     }
 
 
-    public void init() {
+
+    public boolean init() {
+        if (pref == null){
+            return false;
+        }
         String uriStr = pref.getString(SaveInputFields.PREF_LOG_URI, null);
 
+        // check prefs if Uri was earlier saved
         if (uriStr == null) {
             showLogFolderNote();
-            return;
+            return false;
         }
 
         Uri treeUri = Uri.parse(uriStr);
 
+        // if permission was revoked initiate one
         if (!hasPersistedPermission(treeUri)) {
             pref.edit().remove(SaveInputFields.PREF_LOG_URI).apply();
             showLogFolderNote();
-            return;
+            return false;
         }
 
+        // create subfolder in not exist
         try {
             createUssoiFolders(treeUri);
         } catch (Exception e) {
             pref.edit().remove(SaveInputFields.PREF_LOG_URI).apply();
             showLogFolderNote();
         }
+        return true;
     }
 
 
@@ -85,6 +90,7 @@ public final class LogStorageController {
             root.createDirectory("videos");
     }
 
+    // shoe dialog to user to select folder
     private void showLogFolderNote() {
         new AlertDialog.Builder(activity)
                 .setTitle("Select Logging Folder")
@@ -103,6 +109,7 @@ public final class LogStorageController {
         folderPickerLauncher.launch(intent);
     }
 
+    // Set Uri Permission
     public void onFolderPicked(Uri treeUri) {
 
         activity.getContentResolver().takePersistableUriPermission(

@@ -19,6 +19,7 @@ public final class UsbBroadcastHandler {
         this.controller = controller;
     }
 
+    // USB device attach/detach events
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent intent) {

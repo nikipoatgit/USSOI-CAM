@@ -5,6 +5,7 @@ import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_url;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_USB_Switch;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.MASK;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.USSOI_version;
+
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -17,6 +18,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
+
 import androidx.activity.EdgeToEdge;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -26,12 +28,13 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.media3.common.util.UnstableApi;
+
 import com.github.nikipo.ussoi.hardware.bluetooth.BluetoothController;
 import com.github.nikipo.ussoi.hardware.usb.UsbBroadcastHandler;
 import com.github.nikipo.ussoi.hardware.usb.UsbController;
 import com.github.nikipo.ussoi.hardware.usb.UsbDriverController;
 import com.github.nikipo.ussoi.network.update.VersionChecker;
-import com.github.nikipo.ussoi.storage.logs.LogStorageController;
+import com.github.nikipo.ussoi.storage.StorageController;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.R;
@@ -46,7 +49,7 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
     private ServiceController serviceController;
-    private LogStorageController logStorageController;
+    private StorageController StorageController;
     private UsbBroadcastHandler usbBroadcastHandler;
     private UsbDriverController usbDriverController;
     private BluetoothController bluetoothController;
@@ -75,20 +78,27 @@ public class MainActivity extends AppCompatActivity {
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
 
+        //get storage instances
         saveInputFields = SaveInputFields.getInstance(this);
         pref = saveInputFields.get_shared_pref();
         logging = Logging.getInstance(this);
 
+        powerController = new PowerController(this);
+        usbDriverController = new UsbDriverController(this);
+
+        // ActivityResultLauncher  let  user pick directory
         ActivityResultLauncher<Intent> pickLogFolderLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
                 result -> {
-                    if (result.getResultCode() != RESULT_OK ||
-                            result.getData() == null) return;
+                    if (result.getResultCode() != RESULT_OK || result.getData() == null) {
+                        Toast.makeText(this, "Storage folder is required for logging!", Toast.LENGTH_LONG).show();
+                        return;
+                    };
 
                     Uri treeUri = result.getData().getData();
                     if (treeUri == null) return;
 
-                    logStorageController.onFolderPicked(treeUri);
+                    StorageController.onFolderPicked(treeUri);
 
                     if (!powerController.isIgnoringBatteryOptimizations()) {
                         showBatteryOptimizationNote();
@@ -96,35 +106,29 @@ public class MainActivity extends AppCompatActivity {
                 }
         );
 
+        // Storage Folder Permission Check , Dialog for folder selection
+        StorageController = new StorageController(this, saveInputFields, pickLogFolderLauncher);
+        if (!StorageController.init()){
+            Toast.makeText(this, "Storage initiation failed", Toast.LENGTH_LONG).show();
+            this.finishAffinity();
+        }
+
         logging.log("Application Started / Main Activity Created");
 
 
         initUi();
+
+        // Create Permission Launcher
         setupPermissionLauncher();
-        powerController = new PowerController(this);
-        usbDriverController = new UsbDriverController(this);
+        // launch  Dialog for permission
         permissionLauncher.launch(
                 PermissionControl.required(this)
         );
-        UsbController usbController = new UsbController(this, usbInfoText);
 
-        usbBroadcastHandler =
-                new UsbBroadcastHandler(this, usbController);
+        setUpUSB();
 
-        usbController.checkExistingDevices();
-        usbBroadcastHandler.register();
         bluetoothController =
                 new BluetoothController(this, permissionLauncher);
-
-
-        logStorageController =
-                new LogStorageController(
-                        this,
-                        saveInputFields,
-                        pickLogFolderLauncher
-                );
-
-        logStorageController.init();
 
 
         serviceController = new ServiceController(this);
@@ -275,6 +279,14 @@ public class MainActivity extends AppCompatActivity {
         serviceButton.setText(isRunning ? "Stop Service" : "Start Service");
     }
 
+    private void setUpUSB() {
+        UsbController usbController = new UsbController(this, usbInfoText);
+        usbBroadcastHandler = new UsbBroadcastHandler(this, usbController);
+        usbController.checkExistingDevices();
+        usbBroadcastHandler.register();
+    }
+
+    // bulk permission request handler
     private void setupPermissionLauncher() {
         permissionLauncher = registerForActivityResult(
                 new ActivityResultContracts.RequestMultiplePermissions(),
@@ -288,7 +300,6 @@ public class MainActivity extends AppCompatActivity {
                         Toast.makeText(this, "Permissions required for operation", Toast.LENGTH_LONG).show();
                 }
         );
-
     }
 
     private void showBatteryOptimizationNote() {
