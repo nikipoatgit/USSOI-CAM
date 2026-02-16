@@ -4,6 +4,8 @@ import android.util.Log;
 
 import androidx.annotation.NonNull;
 
+import com.github.nikipo.ussoi.storage.logs.Logging;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -19,9 +21,8 @@ import okhttp3.Response;
 
 public class AuthLogin {
     private static final String TAG = "AuthLogin";
-    private static final MediaType JSON
-            = MediaType.get("application/json; charset=utf-8");
-
+    private Logging logging;
+    private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private final OkHttpClient client = new OkHttpClient();
 
     public interface LoginCallback {
@@ -29,9 +30,12 @@ public class AuthLogin {
         void onFailure(String error);
     }
 
-    public void login(String roomId, String roomPwd,String LOGIN_URL, LoginCallback callback) {
+    public void login(Logging logging,String roomId, String roomPwd,String LOGIN_URL, LoginCallback callback) {
 
         try {
+            String normalisedLoginUrl = normalizeUrl(LOGIN_URL);
+            logging.log(TAG + ": "+"Auth in progress ");
+            logging.log(TAG + ": " + "Login URL : " + normalisedLoginUrl);
             Log.d(TAG,"Auth in progress ");
             JSONObject json = new JSONObject();
             json.put("roomId", roomId);
@@ -40,7 +44,7 @@ public class AuthLogin {
             RequestBody body = RequestBody.create(json.toString(), JSON);
 
             Request request = new Request.Builder()
-                    .url(normalizeUrl(LOGIN_URL))
+                    .url(normalisedLoginUrl)
                     .post(body)
                     .build();
 
@@ -67,13 +71,13 @@ public class AuthLogin {
                     }
 
                     if (!respJson.has("sessionKey")) {
-                        Log.d(TAG,"Session key missing ");
                         callback.onFailure("Session key missing");
                         return;
                     }
 
                     String sessionKey = respJson.optString("sessionKey","null");
                     Log.d(TAG,"sessionKey Updated : " + sessionKey);
+                    logging.log(TAG + ": " + "sessionKey Updated : " + sessionKey);
                     callback.onSuccess(sessionKey);
                 }
             });

@@ -19,7 +19,7 @@ public class ConnManager {
     private final Context context;
     private final String wsUrl;
 
-    // REMOVED: ConnRouter connRouter instance (now using static calls)
+    private static volatile ConnManager instance;
 
     private ImpClientInfoSender impClientInfoSender;
     private WebSocketHandler webSocketHandler;
@@ -29,7 +29,7 @@ public class ConnManager {
     private static Logging logger;
     static final String KEY_Session_KEY = "sessionKey";
 
-    public ConnManager(Context ctx, String url) {
+    private ConnManager(Context ctx, String url) {
         this.context = ctx.getApplicationContext();
         this.wsUrl = url;
 
@@ -38,6 +38,14 @@ public class ConnManager {
         saveInputFields = SaveInputFields.getInstance(ctx);
         this.prefs = saveInputFields.get_shared_pref();
     }
+
+    public static ConnManager getInstance(Context ctx, String url){
+        if (instance == null){
+           instance = new ConnManager(ctx,url);
+        }
+        return instance;
+    }
+
 
     public WebSocketHandler getWebSocketHandlerObject() {
         return webSocketHandler;

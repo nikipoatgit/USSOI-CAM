@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.util.Log;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -23,7 +24,7 @@ import java.util.List;
 import java.util.Set;
 
 public final class BluetoothController {
-
+    private static final String TAG = "BluetoothController";
     private final Activity activity;
     private final ActivityResultLauncher<String[]> permissionLauncher;
 
@@ -34,8 +35,6 @@ public final class BluetoothController {
         this.activity = activity;
         this.permissionLauncher = permissionLauncher;
     }
-
-    /* -------- PUBLIC ENTRY -------- */
 
     public void selectDevicesAndStart(Runnable onDone) {
 
@@ -63,8 +62,6 @@ public final class BluetoothController {
         showDeviceDialog(new ArrayList<>(paired), onDone);
     }
 
-    /* -------- INTERNAL -------- */
-
     private boolean needsPermission() {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                 ActivityCompat.checkSelfPermission(
@@ -82,10 +79,7 @@ public final class BluetoothController {
         }
     }
 
-    private void showDeviceDialog(
-            List<BluetoothDevice> devices,
-            Runnable onDone
-    ) {
+    private void showDeviceDialog(List<BluetoothDevice> devices, Runnable onDone) {
 
         String[] names = new String[devices.size()];
         boolean[] checked = new boolean[devices.size()];
@@ -116,8 +110,10 @@ public final class BluetoothController {
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+
     }
 
+    // Save selected Bt devices to json
     private void updateBtDevicesJson() {
         JSONArray arr = new JSONArray();
 
@@ -128,7 +124,8 @@ public final class BluetoothController {
                 o.put("index", i + 1);
                 o.put("name", d.getName());
                 o.put("mac", d.getAddress());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
             arr.put(o);
         }
 
@@ -139,8 +136,10 @@ public final class BluetoothController {
                 keys.remove();
             }
             try {
+                Log.d(TAG, arr.toString());
                 SaveInputFields.btDevices.put("devices", arr);
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
     }
 }

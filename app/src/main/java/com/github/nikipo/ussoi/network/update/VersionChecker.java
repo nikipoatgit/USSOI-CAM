@@ -1,5 +1,7 @@
 package com.github.nikipo.ussoi.network.update;
 
+import android.util.Log;
+
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -8,15 +10,12 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 
 public final class VersionChecker {
-
+    private static final String TAG = "VersionChecker";
     public interface Callback {
         void onResult(String text);
     }
 
-    public static void check(
-            String currentVersion,
-            Callback cb
-    ) {
+    public static void check(String currentVersion, Callback cb) {
         new Thread(() -> {
             String result;
 
@@ -30,7 +29,8 @@ public final class VersionChecker {
                 }
 
             } catch (Exception e) {
-                result = "Version check failed";
+                Log.d(TAG, "ERROR :" + e);
+                result = "Version check failed rate limit hit";
             }
 
             cb.onResult(result);

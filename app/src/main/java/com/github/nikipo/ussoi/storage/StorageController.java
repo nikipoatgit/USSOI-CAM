@@ -10,12 +10,15 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.appcompat.app.AlertDialog;
 import androidx.documentfile.provider.DocumentFile;
 
+import com.github.nikipo.ussoi.storage.logs.Logging;
+
 import java.util.List;
 
 public final class StorageController {
-
+    private static final String TAG = "StorageController";
     private final Activity activity;
     private final SaveInputFields saveInputFields;
+    private Logging logging;
     private final SharedPreferences pref;
     private final ActivityResultLauncher<Intent> folderPickerLauncher;
 
@@ -24,6 +27,7 @@ public final class StorageController {
             SaveInputFields saveInputFields,
             ActivityResultLauncher<Intent> launcher
     ) {
+        logging = Logging.getInstance(activity);
         this.activity = activity;
         this.saveInputFields = saveInputFields;
         this.pref = saveInputFields.get_shared_pref();
@@ -31,15 +35,16 @@ public final class StorageController {
     }
 
 
-
     public boolean init() {
-        if (pref == null){
+        if (pref == null) {
+            logging.log(TAG + "prefs was null");
             return false;
         }
         String uriStr = pref.getString(SaveInputFields.PREF_LOG_URI, null);
 
         // check prefs if Uri was earlier saved
         if (uriStr == null) {
+            logging.log(TAG + "uriStr was null , Selecting Folder");
             showLogFolderNote();
             return false;
         }
@@ -48,6 +53,7 @@ public final class StorageController {
 
         // if permission was revoked initiate one
         if (!hasPersistedPermission(treeUri)) {
+            logging.log(TAG + "Permission was revoked trying again");
             pref.edit().remove(SaveInputFields.PREF_LOG_URI).apply();
             showLogFolderNote();
             return false;
@@ -80,6 +86,7 @@ public final class StorageController {
         DocumentFile root = DocumentFile.fromTreeUri(activity, treeUri);
 
         if (root == null || !root.canWrite()) {
+            logging.log(TAG + "Folder No write access");
             throw new SecurityException("No write access");
         }
 

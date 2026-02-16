@@ -37,6 +37,7 @@ public final class UsbBroadcastHandler {
         }
     };
 
+    // registers BroadcastReceiver
     public void register() {
         IntentFilter f = new IntentFilter();
         f.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);

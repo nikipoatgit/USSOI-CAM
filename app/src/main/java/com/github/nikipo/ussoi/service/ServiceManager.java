@@ -40,27 +40,24 @@ import java.util.concurrent.ScheduledExecutorService;
 public class ServiceManager extends Service implements LifecycleOwner {
     private final ServiceLifecycleDispatcher mDispatcher = new ServiceLifecycleDispatcher(this);
     private final String TAG = "ServiceManager";
-    private ScheduledExecutorService scheduler;
     private PowerManager.WakeLock wakeLock;
     private SharedPreferences prefs; // code related to handel preferences
     private SaveInputFields saveInputFields;
     private Logging logger;
     public volatile static boolean isRunning = false;
     private ConnManager connectionManager;
-    private DeviceInfo deviceInfo;
-    private volatile boolean loginStatusFlag = false;
 
     @Override
     public void onCreate() {
         mDispatcher.onServicePreSuperOnCreate();
         super.onCreate();
+
         // start Up code
         isRunning = true;
         saveInputFields = SaveInputFields.getInstance(this);
         logger = Logging.getInstance(this);
-        deviceInfo = DeviceInfo.getInstance(this);
 
-        // --- Acquire partial WakeLock (NEW) ---
+        // --- Acquire partial WakeLock  ---
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         if (pm != null) {
             if (wakeLock == null || !wakeLock.isHeld()) {
@@ -79,7 +76,7 @@ public class ServiceManager extends Service implements LifecycleOwner {
     public int onStartCommand(Intent intent, int flags, int startId) {
         mDispatcher.onServicePreSuperOnStart();
 
-        logger.log(TAG + ": Application started" + " Version" + USSOI_version);
+        logger.log(TAG + ": Application started" + " Version" + " " + USSOI_version);
 
         //Start foreground
         Notification notification = ServiceNotificationHelper.createNotification(this);
@@ -99,12 +96,11 @@ public class ServiceManager extends Service implements LifecycleOwner {
         String roomPwd = prefs.getString(KEY_RoomPWD, "blockMe");
         String apiUrl = prefs.getString(KEY_url, "http://10.0.0.1");
 
-        authLogin.login(roomId, roomPwd, apiUrl, new AuthLogin.LoginCallback() {
+        authLogin.login(logger, roomId, roomPwd, apiUrl, new AuthLogin.LoginCallback() {
             @Override
             public void onSuccess(String sessionKey) {
                 logger.log(TAG + ": Login Successful");
                 prefs.edit().putString(KEY_Session_KEY, sessionKey).apply();
-                loginStatusFlag = true;
                 new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
                         android.widget.Toast.makeText(
                                 ServiceManager.this,
@@ -119,7 +115,6 @@ public class ServiceManager extends Service implements LifecycleOwner {
             public void onFailure(String error) {
                 Log.e(TAG, "Login Failed: " + error);
                 logger.log(TAG + ": Login Failed " + error);
-                loginStatusFlag = false;
                 new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
                         android.widget.Toast.makeText(
                                 ServiceManager.this,
@@ -134,19 +129,10 @@ public class ServiceManager extends Service implements LifecycleOwner {
     }
 
     private void initiateConnection() {
-        if (connectionManager == null) {
-            connectionManager = new ConnManager(
-                    this,
-                    KEY_api_path
-            );
-            connectionManager.connect();
+        connectionManager = ConnManager.getInstance(this, KEY_api_path);
+        connectionManager.connect();
+        logger.log(TAG + ": ConnManager connected and Scheduler initialized");
 
-            // Start your scheduler here if it depends on the connection
-            if (scheduler == null || scheduler.isShutdown()) {
-                scheduler = Executors.newSingleThreadScheduledExecutor();
-            }
-            logger.log(TAG + ": ConnManager connected and Scheduler initialized");
-        }
     }
 
     @Override
@@ -160,8 +146,6 @@ public class ServiceManager extends Service implements LifecycleOwner {
             connectionManager.stopAllServices();
             connectionManager = null;
         }
-
-        if (scheduler != null) scheduler.shutdownNow();
 
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
 

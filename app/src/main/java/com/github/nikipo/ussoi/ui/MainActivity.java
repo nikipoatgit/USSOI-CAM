@@ -87,54 +87,54 @@ public class MainActivity extends AppCompatActivity {
         usbDriverController = new UsbDriverController(this);
 
         // ActivityResultLauncher  let  user pick directory
-        ActivityResultLauncher<Intent> pickLogFolderLauncher = registerForActivityResult(
-                new ActivityResultContracts.StartActivityForResult(),
-                result -> {
-                    if (result.getResultCode() != RESULT_OK || result.getData() == null) {
-                        Toast.makeText(this, "Storage folder is required for logging!", Toast.LENGTH_LONG).show();
-                        return;
-                    };
+        ActivityResultLauncher<Intent> pickLogFolderLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() != RESULT_OK || result.getData() == null) {
+                Toast.makeText(this, "Storage folder is required for logging!", Toast.LENGTH_LONG).show();
+                return;
+            }
+            ;
 
-                    Uri treeUri = result.getData().getData();
-                    if (treeUri == null) return;
+            Uri treeUri = result.getData().getData();
+            if (treeUri == null) return;
 
-                    StorageController.onFolderPicked(treeUri);
+            StorageController.onFolderPicked(treeUri);
 
-                    if (!powerController.isIgnoringBatteryOptimizations()) {
-                        showBatteryOptimizationNote();
-                    }
-                }
-        );
+            if (!powerController.isIgnoringBatteryOptimizations()) {
+                showBatteryOptimizationNote();
+            }
+        });
 
         // Storage Folder Permission Check , Dialog for folder selection
         StorageController = new StorageController(this, saveInputFields, pickLogFolderLauncher);
-        if (!StorageController.init()){
+        if (!StorageController.init()) {
             Toast.makeText(this, "Storage initiation failed", Toast.LENGTH_LONG).show();
+             logging.log( TAG + ": "   + "Storage initiation failed");
             this.finishAffinity();
         }
 
-        logging.log("Application Started / Main Activity Created");
-
+         logging.log( TAG + ": "   + "Main Activity Created");
 
         initUi();
-
         // Create Permission Launcher
         setupPermissionLauncher();
         // launch  Dialog for permission
-        permissionLauncher.launch(
-                PermissionControl.required(this)
-        );
+        String[] permissions = PermissionControl.required(this);
+        for (String p : permissions) {
+            logging.log(TAG + "Permissions :" + p);
+        }
+        permissionLauncher.launch(permissions);
 
-        setUpUSB();
+        // usb event display
+        UsbController usbController = new UsbController(this, usbInfoText);
+        usbBroadcastHandler = new UsbBroadcastHandler(this, usbController);
+        usbController.checkExistingDevices();
+        usbBroadcastHandler.register();
 
-        bluetoothController =
-                new BluetoothController(this, permissionLauncher);
-
+        bluetoothController = new BluetoothController(this, permissionLauncher);
 
         serviceController = new ServiceController(this);
 
-        VersionChecker.check(USSOI_version,
-                text -> runOnUiThread(() -> versionTextField.setText(text)));
+        VersionChecker.check(USSOI_version, text -> runOnUiThread(() -> versionTextField.setText(text)));
 
         // short hand for
         // new VersionChecker.Callback() {
@@ -185,15 +185,11 @@ public class MainActivity extends AppCompatActivity {
         connectionToggleGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
 
             if (checkedId == R.id.btnUsb) {
-                radioUsb.setTextColor(isChecked
-                        ? Color.WHITE
-                        : Color.parseColor("#1A1C1E"));
+                radioUsb.setTextColor(isChecked ? Color.WHITE : Color.parseColor("#1A1C1E"));
             }
 
             if (checkedId == R.id.btnBt) {
-                radioBt.setTextColor(isChecked
-                        ? Color.WHITE
-                        : Color.parseColor("#1A1C1E"));
+                radioBt.setTextColor(isChecked ? Color.WHITE : Color.parseColor("#1A1C1E"));
             }
         });
 
@@ -206,15 +202,12 @@ public class MainActivity extends AppCompatActivity {
                 getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 btnKeepScreenOn.setText(R.string.screen_always_on);
                 btnKeepScreenOn.setTextColor(Color.WHITE);
-                btnKeepScreenOn.setBackgroundTintList(
-                        ColorStateList.valueOf(Color.parseColor("#a182bf")));
+                btnKeepScreenOn.setBackgroundTintList(ColorStateList.valueOf(Color.parseColor("#a182bf")));
             } else {
                 getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 btnKeepScreenOn.setText(R.string.timeout_removed);
                 btnKeepScreenOn.setTextColor(Color.BLACK);
-                btnKeepScreenOn.setBackgroundTintList(
-                        ColorStateList.valueOf(
-                                ContextCompat.getColor(this, android.R.color.white)));
+                btnKeepScreenOn.setBackgroundTintList(ColorStateList.valueOf(ContextCompat.getColor(this, android.R.color.white)));
             }
         });
     }
@@ -240,12 +233,7 @@ public class MainActivity extends AppCompatActivity {
             String url = urlIp.getText().toString().trim();
             if (!url.endsWith("/")) url += "/";
 
-
-            pref.edit()
-                    .putString(KEY_url, url)
-                    .putBoolean(KEY_BT_SWITCH, radioBt.isChecked())
-                    .putBoolean(KEY_USB_Switch, radioUsb.isChecked())
-                    .apply();
+            pref.edit().putString(KEY_url, url).putBoolean(KEY_BT_SWITCH, radioBt.isChecked()).putBoolean(KEY_USB_Switch, radioUsb.isChecked()).apply();
 
             // Handle Password Update securely
             String currentId = roomId.getText().toString().trim();
@@ -261,60 +249,44 @@ public class MainActivity extends AppCompatActivity {
 
             // Branch based on connection type
             if (radioBt.isChecked()) {
-                bluetoothController.selectDevicesAndStart(
-                        () -> serviceController.start()
-                );
+                bluetoothController.selectDevicesAndStart(() -> serviceController.start());
 
             } else if (radioUsb.isChecked()) {
-                usbDriverController.selectAndStart(
-                        () -> serviceController.start()
-                );
+                usbDriverController.selectAndStart(() -> serviceController.start());
             } else {
                 serviceController.start();
             }
         }
+
+
     }
 
     private void updateServiceButtonState(boolean isRunning) {
         serviceButton.setText(isRunning ? "Stop Service" : "Start Service");
     }
 
-    private void setUpUSB() {
-        UsbController usbController = new UsbController(this, usbInfoText);
-        usbBroadcastHandler = new UsbBroadcastHandler(this, usbController);
-        usbController.checkExistingDevices();
-        usbBroadcastHandler.register();
-    }
 
     // bulk permission request handler
     private void setupPermissionLauncher() {
-        permissionLauncher = registerForActivityResult(
-                new ActivityResultContracts.RequestMultiplePermissions(),
-                permissions -> {
-                    boolean allGranted = true;
-                    for (Boolean isGranted : permissions.values()) {
-                        if (!isGranted) allGranted = false;
-                    }
-                    if (allGranted) Log.d(TAG, "All permissions granted.");
-                    else
-                        Toast.makeText(this, "Permissions required for operation", Toast.LENGTH_LONG).show();
-                }
-        );
+        permissionLauncher = registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), permissions -> {
+            boolean allGranted = true;
+            for (Boolean isGranted : permissions.values()) {
+                if (!isGranted) allGranted = false;
+            }
+            if (allGranted) {
+                Log.d(TAG, "All permissions granted.");
+                 logging.log( TAG + ": "   + "All permissions granted");
+            } else {
+                 logging.log( TAG + ": "   + "All Were not permissions granted");
+                Toast.makeText(this, "Permissions required for operation", Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     private void showBatteryOptimizationNote() {
-        new AlertDialog.Builder(this)
-                .setTitle("Allow Background Activity")
-                .setMessage(
-                        "To work reliably in the background, the app needs to be excluded from battery optimizations.\n\n" +
-                                "Without this, streaming and logging may stop."
-                )
-                .setCancelable(false)
-                .setPositiveButton("Allow", (d, w) -> powerController.requestIgnoreBatteryOptimization())
-                .setNegativeButton("Cancel", (d, w) -> {
-                    d.dismiss();
-                })
-                .show();
+        new AlertDialog.Builder(this).setTitle("Allow Background Activity").setMessage("To work reliably in the background, the app needs to be excluded from battery optimizations.\n\n" + "Without this, streaming and logging may stop.").setCancelable(false).setPositiveButton("Allow", (d, w) -> powerController.requestIgnoreBatteryOptimization()).setNegativeButton("Cancel", (d, w) -> {
+            d.dismiss();
+        }).show();
     }
 
 
