@@ -26,7 +26,7 @@ public class ConnManager {
     private ClientInfoProvider clientInfoProvider;
     private SharedPreferences prefs;
     private SaveInputFields saveInputFields;
-    private static Logging logger;
+    private Logging logger;
     static final String KEY_Session_KEY = "sessionKey";
 
     private ConnManager(Context ctx, String url) {
@@ -62,7 +62,7 @@ public class ConnManager {
             public void onOpen() {
                 logger.log(TAG + ": WS Connected");
                 if (impClientInfoSender == null) {
-                    impClientInfoSender = new ImpClientInfoSender(webSocketHandler, clientInfoProvider,ConnManager.this);
+                    impClientInfoSender = new ImpClientInfoSender(webSocketHandler, clientInfoProvider,ConnManager.this,logger);
                 }
                 impClientInfoSender.startSending();
             }
@@ -130,11 +130,13 @@ public class ConnManager {
         private final ConnManager sender;
         private volatile boolean running = false;
         private Thread worker;
+        private Logging logger;
 
-        ImpClientInfoSender(WebSocketHandler handler, ClientInfoProvider provider,ConnManager connManager) {
+        ImpClientInfoSender(WebSocketHandler handler, ClientInfoProvider provider,ConnManager connManager,Logging logger) {
             this.webSocketHandler = handler;
             this.clientInfoProvider = provider;
             this.sender = connManager;
+            this.logger = logger;
         }
 
         public synchronized void startSending() {
@@ -158,7 +160,7 @@ public class ConnManager {
                         obj.put("hex", clientInfoProvider.getClientStats()+ ConnRouter.getClientStat());
 
                         sender.send(obj);
-                        Thread.sleep(5000);
+                        Thread.sleep(3000);
 
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();

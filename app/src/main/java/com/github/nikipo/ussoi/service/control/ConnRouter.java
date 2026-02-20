@@ -12,6 +12,7 @@ import android.os.Build;
 import android.util.Log;
 import android.util.Size;
 
+import com.github.nikipo.ussoi.media.highFpsH264.HighFPSCameraController;
 import com.github.nikipo.ussoi.system.DeviceInfo;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 import com.github.nikipo.ussoi.tunnel.BluetoothHandler;
@@ -26,7 +27,7 @@ public class ConnRouter {
     private static final String TAG = "ControlMessageRouter";
 
     // Static state variables
-    private static boolean isParamsReceived ;
+    private static boolean isParamsReceived;
     private static ConnManager connManager;
     private static SaveInputFields saveInputFields;
     private static SharedPreferences prefs;
@@ -64,18 +65,17 @@ public class ConnRouter {
             bluetoothHandler = null;
             Log.d(TAG, "Bthandler Stopped");
         }
-        if(deviceInfo != null){
+        if (deviceInfo != null) {
             deviceInfo.stopAllServices();
         }
     }
 
     public static void route(JSONObject json) {
         String serviceType = json.optString("type", "");
-        logger.log(TAG + " serviceType :" + serviceType);
         switch (serviceType) {
             case "stopAll":
 //              stopAllServices();
-                sendAck("nack", json.optInt("reqId", -1), "Feature Disabled(All systems halted).");
+                sendAck("nack", json.optInt("reqId", -1), "Feature(All systems halt) Disabled.");
                 break;
 
             case "stream":
@@ -96,7 +96,7 @@ public class ConnRouter {
                 try {
                     setUpConfigParams(json);
                 } catch (JSONException e) {
-                    logger.log(TAG + " " + Log.getStackTraceString(e));
+                    logger.log(TAG + " config:" + Log.getStackTraceString(e));
                 }
                 break;
 
@@ -110,7 +110,6 @@ public class ConnRouter {
                 sendAck("ack", json.optInt("reqId", -1), "");
                 break;
             case "deviceInfo":
-
                 JSONObject reply = new JSONObject();
                 try {
                     reply.put("type", "deviceInfo");
@@ -123,9 +122,8 @@ public class ConnRouter {
 
                 break;
             case "getBtDevices":
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    connManager.send(btDevices);
-                }
+                // TODO : SERVER SIDE IMPLEMENTATION REMAINING
+                connManager.send(btDevices);
                 sendAck("ack", json.optInt("reqId", -1), "");
                 break;
 
@@ -136,34 +134,48 @@ public class ConnRouter {
     }
 
 
-
     private static void handleStreamLogic(JSONObject json) {
         int reqId = json.optInt("reqId", -1);
-        if (prefs.getBoolean(KEY_webrtc_Enable, false) && json.optBoolean("webrtc", false)) {
+//        if (prefs.getBoolean(KEY_webrtc_Enable, false) && json.optBoolean("webrtc", false)) {
+//            if (json.has("start")) {
+//                StreamRoute.stopStream();
+//                if (json.optBoolean("start", false)) {
+//                    StreamRoute.initWebrtc(connManager.getWebSocketHandlerObject());
+//                    sendAck("ack", reqId, "");
+//                } else {
+//                    sendAck("ack", reqId, "");
+//                }
+//            } else {
+//                StreamRoute.webrtcControl(json, prefs);
+//                sendAck("ack", json.optInt("reqId", -1), "");
+//            }
+//        } else if (prefs.getBoolean(KEY_mse_Enable, false) && json.optBoolean("mse", false)) {
+//            if (json.has("start")) {
+//                StreamRoute.stopStream();
+//                if (json.optBoolean("start", false)) {
+//                    StreamRoute.initMse();
+//                    sendAck("ack", reqId, "");
+//                } else {
+//                    sendAck("ack", reqId, "");
+//                }
+//            } else {
+//                StreamRoute.mseControl(json, prefs);
+//                sendAck("ack", json.optInt("reqId", -1), "");
+//            }
+//        }
+//       else if (prefs.getBoolean(KEY_mse_high_fps_Enable, false) && json.optBoolean("mse_high_fps", false)) {
+        if (true) {
             if (json.has("start")) {
                 StreamRoute.stopStream();
                 if (json.optBoolean("start", false)) {
-                    StreamRoute.initWebrtc(connManager.getWebSocketHandlerObject());
+                    StreamRoute.initMseHighFps();
                     sendAck("ack", reqId, "");
                 } else {
                     sendAck("ack", reqId, "");
                 }
             } else {
-                    StreamRoute.webrtcControl(json, prefs);
-                    sendAck("ack", json.optInt("reqId", -1), "");
-            }
-        } else if (prefs.getBoolean(KEY_mse_Enable, false) && json.optBoolean("mse", false)) {
-            if (json.has("start")) {
-                StreamRoute.stopStream();
-                if (json.optBoolean("start", false)) {
-                    StreamRoute.initMse();
-                    sendAck("ack", reqId, "");
-                } else {
-                    sendAck("ack", reqId, "");
-                }
-            } else {
-                    StreamRoute.mseControl(json, prefs);
-                    sendAck("ack", json.optInt("reqId", -1), "");
+                StreamRoute.mseHighFpsControl(json, prefs);
+                sendAck("ack", json.optInt("reqId", -1), "");
             }
         }
     }
@@ -199,7 +211,7 @@ public class ConnRouter {
             if (usbHandler != null) {
                 usbHandler.stopAllServices();
                 usbHandler = null;
-            } else if (bluetoothHandler != null ) {
+            } else if (bluetoothHandler != null) {
                 bluetoothHandler.stopAllServices();
                 bluetoothHandler = null;
             }
@@ -213,6 +225,7 @@ public class ConnRouter {
         boolean localRecord = json.optBoolean("local", false);
         boolean webrtc = json.optBoolean("webrtc", false);
         boolean mse = json.optBoolean("mse", false);
+        boolean mse_high_fps = json.optBoolean("mse_high_fps", false);
         int baudrate = json.optInt("baudrate", 115200);
         int bitrateKbps = json.optInt("bitrate", 500);
         JSONArray turnServer = json.getJSONArray("turn");
@@ -230,10 +243,10 @@ public class ConnRouter {
         }
 
 
-
         prefs.edit()
                 .putBoolean(KEY_webrtc_Enable, webrtc)
                 .putBoolean(KEY_mse_Enable, mse)
+                .putBoolean(KEY_mse_high_fps_Enable,mse_high_fps)
                 .putInt(KEY_BAUD_RATE, baudrate)
                 .putInt(KEY_LocalVideoBitrate, bitrateKbps)
                 .putBoolean(KEY_local_recording, localRecord)
@@ -274,15 +287,17 @@ public class ConnRouter {
         try {
             reply.put("type", "config");
             reply.put("tunnelMode", status);
-            reply.put("webrtc",prefs.getBoolean(KEY_webrtc_Enable,false));
-            reply.put("mse",prefs.getBoolean(KEY_mse_Enable,false));
-            reply.put("local",prefs.getBoolean(KEY_local_recording,false));
-            reply.put("version",USSOI_version);
+            reply.put("webrtc", prefs.getBoolean(KEY_webrtc_Enable, false));
+            reply.put("mse", prefs.getBoolean(KEY_mse_Enable, false));
+            reply.put("local", prefs.getBoolean(KEY_local_recording, false));
+            reply.put("version", USSOI_version);
             reply.put("isParamsReceived", isParamsReceived);
-            reply.put("record",record);
+            reply.put("record", record);
             reply.put("stream", stream);
+            reply.put("HighFpsSupport", getHighFpsCamerasJson());
+            // TODO : SERVER SIDE IMPLEMENTATION REMAINING
         } catch (JSONException e) {
-            logger.log(TAG + " " + Log.getStackTraceString(e));
+            logger.log(TAG + " getUserParams: " + Log.getStackTraceString(e));
         }
         return reply;
     }
@@ -321,6 +336,55 @@ public class ConnRouter {
             logger.log(TAG + " " + Log.getStackTraceString(e));
         }
     }
+
+    private static JSONObject getHighFpsCamerasJson() {
+        JSONObject result = new JSONObject();
+        JSONArray camerasArray = new JSONArray();
+
+        try {
+            CameraManager manager =
+                    (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
+
+            if (manager == null) {
+                result.put("error", "CameraManager unavailable");
+                return result;
+            }
+
+            for (String cameraId : manager.getCameraIdList()) {
+
+
+                Object caps =
+                        HighFPSCameraController.getHighSpeedCapabilities(ctx, cameraId);
+
+                if (caps != null) {
+                    JSONObject cam = new JSONObject();
+                    cam.put("cameraId", cameraId);
+                    camerasArray.put(cam);
+
+                    Log.d(TAG, "High-FPS camera found: " + cameraId);
+                }
+            }
+
+            result.put("type", "cameraCapabilities");
+            result.put("highFpsCameras", camerasArray);
+            result.put("count", camerasArray.length());
+
+            if (camerasArray.length() == 0) {
+                result.put("note", "No high-FPS cameras supported");
+            }
+
+        } catch (Exception e) {
+            try {
+                result.put("error", e.getMessage());
+            } catch (Exception ignored) {
+            }
+            logger.log(TAG + ": Error querying cameras" + e);
+            Log.e(TAG, "Error querying cameras", e);
+        }
+
+        return result;
+    }
+
 
     public static void sendAck(String type, int reqId, String msg) {
         try {

@@ -4,6 +4,7 @@ import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_RoomID;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_RoomPWD;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Session_KEY;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_api_path;
+import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_mse_high_fps_Enable;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_url;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_local_recording;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_mse_Enable;
@@ -87,6 +88,7 @@ public class ServiceManager extends Service implements LifecycleOwner {
         prefs.edit()
                 .putBoolean(KEY_mse_Enable, false)
                 .putBoolean(KEY_webrtc_Enable, false)
+                .putBoolean(KEY_mse_high_fps_Enable, false)
                 .putBoolean(KEY_local_recording, false)
                 .apply();
 

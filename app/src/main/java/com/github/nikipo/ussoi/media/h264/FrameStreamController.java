@@ -37,7 +37,6 @@ public final class FrameStreamController {
 
     private Thread streamThread;
 
-
     private volatile boolean initialized;
     private volatile boolean streaming;
     private volatile boolean isRecording;

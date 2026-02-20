@@ -32,7 +32,7 @@ public class ServiceNotificationHelper {
             NotificationChannel channel = new NotificationChannel(
                     NOTIFICATION_CHANNEL_ID,
                     "Streaming Service Channel",
-                    NotificationManager.IMPORTANCE_LOW
+                    NotificationManager.IMPORTANCE_HIGH
             );
 
             NotificationManager manager =

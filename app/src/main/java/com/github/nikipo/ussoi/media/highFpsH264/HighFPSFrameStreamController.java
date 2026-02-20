@@ -1,5 +1,8 @@
 package com.github.nikipo.ussoi.media.highFpsH264;
 
+import static com.github.nikipo.ussoi.service.control.ConnRouter.sendAck;
+import static com.github.nikipo.ussoi.storage.SaveInputFields.streamingUrl;
+
 import android.content.Context;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
@@ -11,18 +14,22 @@ import android.view.Surface;
 
 import com.github.nikipo.ussoi.media.enocders.LocalRecorder;
 import com.github.nikipo.ussoi.media.enocders.StreamingEncoder;
+import com.github.nikipo.ussoi.network.WebSocketHandler;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
-public final class HighFPSFrameStreamController {
+public class HighFPSFrameStreamController {
 
     private static final String TAG = "HighFPSStreamController";
-
+    private static HighFPSFrameStreamController instance;
     private final Context context;
-    private HighFPSCameraController cameraController;
+    private HighFPSCameraController highFPSCameraController;
     private LocalRecorder localRecorder;
     private StreamingEncoder streamingEncoder;
-
+    private WebSocketHandler ws;
     private String currentCameraId = null;
 
     // Both HQ and LQ must use SAME size for high-speed
@@ -34,17 +41,30 @@ public final class HighFPSFrameStreamController {
 
     private int targetFps = 60;  // 60, 120, or 240 depending on device
     private Size highSpeedSize;
+    private volatile boolean streaming;
+    private volatile boolean initialized;
+    private volatile boolean isRecording;
+    private static final int HEADER_SIZE = 1 + 8;
+    private long basePtsUs = -1;
+    private Thread streamThread;
 
-    public HighFPSFrameStreamController(Context ctx) {
+    private HighFPSFrameStreamController(Context ctx) {
         context = ctx.getApplicationContext();
-        cameraController = new HighFPSCameraController(context);
+        highFPSCameraController = new HighFPSCameraController(context);
     }
 
-    /**
-     * Initialize with high-speed configuration
-     */
-    public synchronized void init() {
-        currentCameraId = getCameraId();
+    public static HighFPSFrameStreamController getInstance(Context ctx) {
+        if (instance == null) {
+            instance = new HighFPSFrameStreamController(ctx);
+        }
+        return instance;
+    }
+
+    public synchronized void init(String sessionKey) {
+        streaming = false;
+        initialized = false;
+        isRecording = false;
+        currentCameraId = cycleCameraId(currentCameraId);
         if (currentCameraId == null) {
             Log.e(TAG, "No camera available");
             return;
@@ -71,6 +91,30 @@ public final class HighFPSFrameStreamController {
 
         Log.d(TAG, "High-speed config: " + videoWidth + "x" + videoHeight + " @ " + targetFps + " FPS");
 
+        ws = new WebSocketHandler(context, new WebSocketHandler.MessageCallback() {
+            public void onOpen() {
+            }
+
+            @Override
+            public void onPayloadReceivedText(String payload) {
+            }
+
+            @Override
+            public void onPayloadReceivedByte(byte[] payload) {
+            }
+
+            @Override
+            public void onClosed() {
+            }
+
+            @Override
+            public void onError(String e) {
+            }
+        });
+        ws.setupConnection(streamingUrl, sessionKey);
+
+        initialized = true;
+
         try {
             // BOTH encoders use SAME size for high-speed
             streamingEncoder = new StreamingEncoder();
@@ -79,8 +123,8 @@ public final class HighFPSFrameStreamController {
             localRecorder = new LocalRecorder(context);
             Surface hqSurface = localRecorder.prepare(videoWidth, videoHeight, targetFps, HQBitrate);
 
-            cameraController.attachHQSurface(hqSurface);
-            cameraController.attachLQSurface(lqSurface);
+            highFPSCameraController.attachHQSurface(hqSurface);
+            highFPSCameraController.attachLQSurface(lqSurface);
 
         } catch (IOException e) {
             Log.e(TAG, "Error initializing encoders", e);
@@ -144,44 +188,261 @@ public final class HighFPSFrameStreamController {
      * Start streaming at high FPS
      */
     public void startStreaming() {
-        if (highSpeedSize == null) {
+        if (!initialized) {
             Log.e(TAG, "Not initialized");
             return;
         }
 
-        cameraController.start(currentCameraId, highSpeedSize, targetFps);
+        highFPSCameraController.start(currentCameraId, highSpeedSize, targetFps);
         streamingEncoder.start();
 
+        streamThread = new Thread(this::drainEncoder, "StreamDrain");
+        streamThread.start();
+        streaming = true;
         Log.d(TAG, "Started high-speed streaming");
+    }
+
+    private void drainEncoder() {
+        while (streaming) {
+            StreamingEncoder.EncodedFrame frame =
+                    streamingEncoder.dequeue();
+
+            if (frame == null) continue;
+
+            byte[] packet = buildPacket(frame);
+            ws.connSendPayloadBytes(packet);
+        }
+    }
+
+    private byte[] buildPacket(StreamingEncoder.EncodedFrame frame) {
+
+        if (basePtsUs < 0) {
+            basePtsUs = frame.ptsUs;
+        }
+
+        long pts = frame.ptsUs - basePtsUs;
+        ByteBuffer src = frame.data.duplicate();
+
+        byte[] data = new byte[HEADER_SIZE + src.remaining()];
+        int i = 0;
+
+        data[i++] = (byte) (frame.keyFrame ? 1 : 0);
+
+        for (int b = 7; b >= 0; b--) {
+            data[i++] = (byte) (pts >> (b * 8));
+        }
+
+        src.get(data, i, src.remaining());
+        return data;
     }
 
     /**
      * Start recording at high FPS
      */
-    public void startRecording() {
+    public void startRecording(int reqId) {
+        if (!initialized && !streaming) {
+            sendAck("nack", reqId, "Streaming and Camera Not Init");
+            return;
+        }
         if (localRecorder != null) {
             localRecorder.start();
             Log.d(TAG, "Started high-speed recording");
         }
+        isRecording = true;
     }
 
-    public void pauseStreaming() {
-        streamingEncoder.pauseStreaming();
+    public void toggleVideo(boolean video, int reqId) {
+        if (highFPSCameraController != null) {
+            sendAck("ack", reqId, "Play/Pause Cmd");
+            if (video) {
+                streamingEncoder.resumeStreaming();
+            } else {
+                streamingEncoder.pauseStreaming();
+            }
+        }
     }
 
-    public void resumeStreaming() {
+    public synchronized void toggleCamera(int reqId) {
+        if (isRecording) {
+            sendAck("ack", reqId, "Recording Active");
+            return;
+        }
 
-        streamingEncoder.resumeStreaming();
+        currentCameraId = cycleCameraId(currentCameraId);
+        if (currentCameraId == null) return;
+
+        if (streaming) {
+            restartService();
+        }
     }
 
-    public void setTargetFPS(int fps) {
+    private String cycleCameraId(String currentCameraId) {
+        try {
+            CameraManager manager =
+                    (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
+            if (manager == null) return null;
+
+            List<String> highFpsCameraIds = new ArrayList<>();
+
+            for (String cameraId : manager.getCameraIdList()) {
+                if (HighFPSCameraController
+                        .getHighSpeedCapabilities(context, cameraId) != null) {
+
+                    highFpsCameraIds.add(cameraId);
+                }
+            }
+
+            if (highFpsCameraIds.isEmpty()) {
+                Log.w(TAG, "No camera supports high-FPS");
+                return null;
+            }
+
+            // First selection
+            if (currentCameraId == null) {
+                return highFpsCameraIds.get(0);
+            }
+
+            int index = highFpsCameraIds.indexOf(currentCameraId);
+
+            // If current not found or last → wrap
+            if (index < 0 || index == highFpsCameraIds.size() - 1) {
+                return highFpsCameraIds.get(0);
+            }
+
+            // Normal cycle
+            return highFpsCameraIds.get(index + 1);
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error selecting high-FPS camera", e);
+            return null;
+        }
+    }
+
+
+    public void setTargetFPS(int fps, int reqId) {
+        if (!streaming) {
+            sendAck("nack", reqId, "Streaming Disabled");
+            return;
+        }
+        if (isRecording) {
+            sendAck("nack", reqId, "Recording Active");
+            return;
+        }
         this.targetFps = fps;
-        // Reinitialize to apply new FPS
+        sendAck("ack", reqId, "Recording Started");
+    }
+
+    public synchronized void changeCaptureFormat(int width, int height, int fps, int reqId) {
+        if (!initialized) {
+            sendAck("nack", reqId, "!! Controller not initialized");
+            Log.w(TAG, "Cannot change format: Controller not initialized.");
+            return;
+        }
+        if (isRecording) {
+            sendAck("nack", reqId, "Recording active");
+            return;
+        }
+
+        highSpeedSize = findBestHighSpeedSize(currentCameraId, width, height);
+
+        if (highSpeedSize == null) {
+            Log.e(TAG, "No suitable high-speed size found");
+            sendAck("nack", reqId, "No suitable high-speed size found");
+            return;
+        }
+
+        videoWidth = highSpeedSize.getWidth();
+        videoHeight = highSpeedSize.getHeight();
+
+        restartService();
+        sendAck("ack", reqId, "High FPS Stream Resolution Changed ");
+    }
+
+    public boolean isRecordingActive() {
+        return localRecorder.isRecordingActive();
+    }
+
+    private void restartService() {
+
+        streaming = false;
+        isRecording = false;
+
+        Thread t = streamThread;
+        streamThread = null;
+
+        if (t != null) {
+            try {
+                t.join();
+            } catch (InterruptedException ignored) {
+            }
+        }
+
+        synchronized (this) {
+
+            streaming = false;
+
+            highFPSCameraController.stop();
+
+            if (streamingEncoder != null) {
+                streamingEncoder.stop();
+                streamingEncoder.release();
+            }
+
+            if (localRecorder != null) {
+                if (isRecording) {
+                    localRecorder.stop();
+                }
+                localRecorder.release();
+                localRecorder = null;
+            }
+
+            highFPSCameraController = new HighFPSCameraController(context);
+
+            try {
+                streamingEncoder = new StreamingEncoder();
+
+                Surface lqSurface = streamingEncoder.prepare(videoWidth, videoHeight, targetFps, LQBitrate);
+
+                localRecorder = new LocalRecorder(context);
+                Surface hqSurface = localRecorder.prepare(videoWidth, videoHeight, targetFps, HQBitrate);
+
+                highFPSCameraController.attachHQSurface(hqSurface);
+                highFPSCameraController.attachLQSurface(lqSurface);
+
+            } catch (IOException e) {
+//                logger.log(TAG + e);
+                throw new RuntimeException(e);
+            }
+
+
+            basePtsUs = -1;
+            streaming = true;
+            initialized = true;
+            isRecording = false;
+
+            highFPSCameraController.start(currentCameraId, highSpeedSize, targetFps);
+            streamingEncoder.start();
+
+            streamThread = new Thread(this::drainEncoder, "StreamDrain");
+            streamThread.start();
+        }
     }
 
     public synchronized void stop() {
-        if (cameraController != null) {
-            cameraController.stop();
+        streaming = false;
+        initialized = false;
+        isRecording = false;
+        if (streamThread != null) {
+            try {
+                streamThread.join();
+            } catch (InterruptedException e) {
+//                logger.log(TAG + " join interrupted " + e);
+            }
+            streamThread = null;
+        }
+
+        if (highFPSCameraController != null) {
+            highFPSCameraController.stop();
         }
 
         if (streamingEncoder != null) {
@@ -199,28 +460,15 @@ public final class HighFPSFrameStreamController {
         Log.d(TAG, "Stopped");
     }
 
-    private String getCameraId() {
-        try {
-            CameraManager manager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
 
-            if (manager == null) return null;
-
-            for (String cameraId : manager.getCameraIdList()) {
-                // Query your high-FPS capability checker
-                if (HighFPSCameraController.getHighSpeedCapabilities(context, cameraId) != null) {
-
-                    Log.d(TAG, "High-FPS camera found: " + cameraId);
-                    return cameraId;
-                }
-            }
-
-            Log.w(TAG, "No camera supports high-FPS");
-            return null;
-
-        } catch (Exception e) {
-            Log.e(TAG, "Error selecting high-FPS camera", e);
-            return null;
-        }
+    public void ChangeFrameInterval(int frameIntervalMs) {
     }
 
+    public void setVideoBitrate(int bitrate, int reqId) {
+        if (initialized && streaming && streamingEncoder != null) {
+            LQBitrate = bitrate;
+            streamingEncoder.setBitrate(bitrate);
+            sendAck("ack", reqId, "Stream Bitrate Cmd ");
+        }
+    }
 }

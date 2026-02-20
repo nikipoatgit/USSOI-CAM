@@ -15,6 +15,7 @@ import android.os.Environment;
 import androidx.documentfile.provider.DocumentFile;
 
 import com.github.nikipo.ussoi.media.h264.FrameStreamController;
+import com.github.nikipo.ussoi.media.highFpsH264.HighFPSFrameStreamController;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.network.WebSocketHandler;
@@ -27,6 +28,7 @@ public class StreamRoute {
     private static final String TAG = "StreamRoute";
     private static WebRtcHandler webRtcHandler;
     private static FrameStreamController frameStreamController;
+    private static HighFPSFrameStreamController highFPSFrameStreamController;
     private static SharedPreferences prefs;
     private static Logging logger;
     private static Context context;
@@ -55,6 +57,12 @@ public class StreamRoute {
         stream = true;
     }
 
+    public static void initMseHighFps() {
+        highFPSFrameStreamController = HighFPSFrameStreamController.getInstance(context);
+        highFPSFrameStreamController.init(prefs.getString(KEY_Session_KEY, "block"));
+        highFPSFrameStreamController.startStreaming();
+        stream = true;
+    }
 
     public static boolean isRecording(){
         if (stream){
@@ -62,6 +70,9 @@ public class StreamRoute {
                 record = webRtcHandler.isRecordingActive();
             } else if (frameStreamController != null) {
                 record =frameStreamController.isRecordingActive();
+            }
+            else if (highFPSFrameStreamController != null) {
+                record =highFPSFrameStreamController.isRecordingActive();
             }
         }
         return record;
@@ -74,6 +85,10 @@ public class StreamRoute {
         if (webRtcHandler != null) {
             webRtcHandler.stopAllServices();
             webRtcHandler = null;
+        }
+        if (highFPSFrameStreamController != null){
+            highFPSFrameStreamController.stop();
+            highFPSFrameStreamController = null;
         }
 
         if (Build.VERSION.SDK_INT >= 26) {
@@ -199,6 +214,56 @@ public class StreamRoute {
                     frameStreamController.startRecording(json.optInt("reqId", -1));
                 else {
                     sendAck("nack", json.optInt("reqId", -1), "Local Recording is Off");
+                }
+            }
+        }
+    }
+
+    public static void mseHighFpsControl(JSONObject json, SharedPreferences prefs) {
+        int reqId = json.optInt("reqId", -1);
+        if (highFPSFrameStreamController != null && prefs.getBoolean(KEY_mse_Enable, false)) {
+            if (json.has("video")) {
+                highFPSFrameStreamController.toggleVideo(json.optBoolean("video", true),reqId);
+            } else if (json.has("switch")) {
+                highFPSFrameStreamController.toggleCamera(reqId);
+            } else if (json.has("res")) {
+                JSONObject quality = json.optJSONObject("quality");
+                if (quality != null) {
+                    int width = quality.optInt("width", 1200);
+                    int height = quality.optInt("height", 720);
+                    int fps = quality.optInt("fps", 20);
+                    if (width <= 0 || height <= 0 || fps <= 0) {
+                        logger.log(TAG + "Invalid (non-positive) quality params: " +
+                                "w=" + width +
+                                " h=" + height +
+                                " fps=" + fps);
+                        sendAck("nack", json.optInt("reqId", -1), "Invalid (non-positive)");
+
+                        return;
+                    }
+                    highFPSFrameStreamController.changeCaptureFormat(width, height, fps,reqId);
+                }
+            } else if (json.has("fps")) {
+                int fps = json.optInt("fps", 20);
+                if (fps < 1) {
+                    sendAck("nack", json.optInt("reqId", -1), "Fps Can't be less than 1");
+                }
+                int frameIntervalMs = 1000 / fps;
+                highFPSFrameStreamController.ChangeFrameInterval(frameIntervalMs);
+            } else if (json.has("bitrate")) {
+                int bitrate = json.optInt("bitrate");
+                if ( bitrate <= 0 ) {
+                    logger.log(TAG + "Invalid (non-positive) quality params: " +
+                            " br=" + bitrate);
+                    sendAck("nack", json.optInt("reqId", -1), "Invalid (non-positive)");
+                    return;
+                }
+                highFPSFrameStreamController.setVideoBitrate(bitrate,reqId);
+            } else if (json.has("record") && json.optBoolean("record", false)) {
+                if (prefs.getBoolean(KEY_local_recording, false))
+                    highFPSFrameStreamController.startRecording(json.optInt("reqId", -1));
+                else {
+                    sendAck("nack", reqId, "Local Recording is Off");
                 }
             }
         }

@@ -32,6 +32,7 @@ public  class SaveInputFields {
     // --- Feature Toggles (Switches) ---
     public static final String KEY_webrtc_Enable   = "webrtc";
     public static final String KEY_mse_Enable      = "mse";
+    public static final String KEY_mse_high_fps_Enable      = "mse_high_fps";
     public static final String KEY_local_recording = "localRecording";
     public static final String KEY_BT_SWITCH       = "btEnable";
     public static final String KEY_USB_Switch      = "usb";
