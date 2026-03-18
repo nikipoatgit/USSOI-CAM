@@ -24,39 +24,43 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 /**
- * Assembles telemetry data from the four provider components into a
- * little-endian binary packet encoded as an uppercase hex string.
+ * *****************************************************************************
  *
- * Protocol structure — 58 bytes total:
- * ┌──────────────────────────────────────────────────────────┐
- * │ Section       │ Fields                        │ Bytes   │
- * ├───────────────┼───────────────────────────────┼─────────┤
- * │ Power         │ current (short)               │ 2       │
- * │               │ battery level (byte)          │ 1       │
- * │               │ battery temp °C (float)       │ 4       │
- * │               │ thermal status (byte)         │ 1       │
- * ├───────────────┼───────────────────────────────┼─────────┤
- * │ Telecom       │ cellular dBm (short)          │ 2       │
- * │               │ wifi dBm (short)              │ 2       │
- * │               │ network type (byte)           │ 1       │
- * │               │ data network type (byte)      │ 1       │
- * ├───────────────┼───────────────────────────────┼─────────┤
- * │ Network       │ upload KB/s (float)           │ 4       │
- * │               │ download KB/s (float)         │ 4       │
- * │               │ session usage MB (float)      │ 4       │
- * ├───────────────┼───────────────────────────────┼─────────┤
- * │ Location      │ latitude (double)             │ 8       │
- * │               │ longitude (double)            │ 8       │
- * │               │ accuracy m (float)            │ 4       │
- * │               │ speed m/s (float)             │ 4       │
- * │               │ altitude m (double)           │ 8       │
- * └───────────────┴───────────────────────────────┴─────────┘
- *                                           Total: 58 bytes
- *                                    Hex string: 116 chars
- *
- * All fields use little-endian byte order.
- * Unknown / unsupported fields use sentinel values defined per provider.
+ * @author nikhi
+ * *****************************************************************************
+ * @file TelemetryPacketBuilder
+ * @attention Copyright (c) 2026
+ * All rights reserved.
+ * <p>
+ * This software is licensed under the terms described in the LICENSE file
+ * located in the root directory of this project.
+ * If no LICENSE file is present, this software is provided "AS IS",
+ * without warranty of any kind, express or implied.
+ * <p>
+ * *****************************************************************************
  */
+
+
+//Field,Offset (byte),Size (bytes),Type,Raw Value,Scale / Conversion,Final Unit
+//Current,0,2,int16,raw,raw,mA
+//Battery Level,2,1,uint8,raw,raw,%
+//Temperature,3,4,float32,raw,raw,°C
+//Thermal Status,7,1,uint8,raw,raw,enum
+//
+//Cellular dBm,8,2,int16,raw,raw,dBm
+//WiFi dBm,10,2,int16,raw,raw,dBm
+//Network Type,12,1,uint8,raw,raw,enum
+//Data Network Type,13,1,uint8,raw,raw,enum
+//
+//Upload Speed,14,4,int32,raw,raw / 100,KB/s
+//Download Speed,18,4,int32,raw,raw / 100,KB/s
+//Session Usage,22,4,int32,raw,raw / 100,MB
+//
+//Latitude,26,4,float32,raw,raw,degrees
+//Longitude,30,4,float32,raw,raw,degrees
+//Accuracy,34,4,float32,raw,raw,meters
+//Speed,38,4,float32,raw,raw,m/s
+//Altitude,42,4,float32,raw,raw,meters
 public class TelemetryPacketBuilder {
 
     private static final String TAG = "TelemetryPacketBuilder";
