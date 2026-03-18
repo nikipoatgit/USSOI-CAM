@@ -1,5 +1,7 @@
 package com.github.nikipo.ussoi.service.control;
 
+import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_auth_api_path;
+
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -30,61 +32,125 @@ public class AuthLogin {
         void onFailure(String error);
     }
 
-    public void login(Logging logging,String roomId, String roomPwd,String LOGIN_URL, LoginCallback callback) {
+    public void login(Logging logging,
+                      String roomId,
+                      String roomPwd,
+                      String LOGIN_URL,
+                      LoginCallback callback) {
 
         try {
-            String normalisedLoginUrl = normalizeUrl(LOGIN_URL);
-            logging.log(TAG + ": "+"Auth in progress ");
-            logging.log(TAG + ": " + "Login URL : " + normalisedLoginUrl);
-            Log.d(TAG,"Auth in progress ");
-            JSONObject json = new JSONObject();
-            json.put("roomId", roomId);
-            json.put("roomPwd", roomPwd);
+            String url = normalizeUrl(LOGIN_URL);
 
-            RequestBody body = RequestBody.create(json.toString(), JSON);
+            JSONObject keyReq = new JSONObject();
+            keyReq.put("type", "getKey");
 
-            Request request = new Request.Builder()
-                    .url(normalisedLoginUrl)
-                    .post(body)
+            Request keyRequest = new Request.Builder()
+                    .url(url)
+                    .post(RequestBody.create(keyReq.toString(), JSON))
                     .build();
 
-            client.newCall(request).enqueue(new Callback() {
+            client.newCall(keyRequest).enqueue(new Callback() {
+
                 @Override
                 public void onFailure(@NonNull Call call, IOException e) {
-                    callback.onFailure(e.getMessage());
+                    callback.onFailure("Key fetch failed: " + e.getMessage());
                 }
 
                 @Override
                 public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+
                     if (!response.isSuccessful()) {
-                        Log.d(TAG,"HTTPS " + response.code() );
-                        callback.onFailure("HTTPS " + response.code());
+                        callback.onFailure("Key HTTP " + response.code());
                         return;
                     }
 
-                    String responseBody = response.body().string();
-                    JSONObject respJson = null;
                     try {
-                        respJson = new JSONObject(responseBody);
-                    } catch (JSONException e) {
-                        throw new RuntimeException(e);
-                    }
+                        JSONObject keyJson = new JSONObject(response.body().string());
 
-                    if (!respJson.has("sessionKey")) {
-                        callback.onFailure("Session key missing");
-                        return;
-                    }
+                        String publicKey = keyJson.getString("publicKey");
+                        String deviceId = keyJson.optString("deviceId", "null");
 
-                    String sessionKey = respJson.optString("sessionKey","null");
-                    Log.d(TAG,"sessionKey Updated : " + sessionKey);
-                    logging.log(TAG + ": " + "sessionKey Updated : " + sessionKey);
-                    callback.onSuccess(sessionKey);
+                        JSONObject inner = new JSONObject();
+                        inner.put("roomId", roomId);
+                        inner.put("roomPwd", roomPwd);
+
+                        String encrypted = encryptRSA(inner.toString(), publicKey);
+
+                        JSONObject loginJson = new JSONObject();
+                        loginJson.put("type", "login");
+                        loginJson.put("deviceName", "dev1");
+                        loginJson.put("deviceId", deviceId);
+                        loginJson.put("data", encrypted);
+
+                        Request loginRequest = new Request.Builder()
+                                .url(url)
+                                .post(RequestBody.create(loginJson.toString(), JSON))
+                                .build();
+
+                        client.newCall(loginRequest).enqueue(new Callback() {
+
+                            @Override
+                            public void onFailure(@NonNull Call call, IOException e) {
+                                callback.onFailure("Login failed: " + e.getMessage());
+                            }
+
+                            @Override
+                            public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+
+                                if (!response.isSuccessful()) {
+                                    callback.onFailure("Login HTTP " + response.code());
+                                    return;
+                                }
+
+                                try {
+                                    JSONObject resp = new JSONObject(response.body().string());
+
+                                    if (!resp.has("deviceToken")) {
+                                        callback.onFailure("Token missing");
+                                        return;
+                                    }
+
+                                    String token = resp.getString("deviceToken");
+                                    callback.onSuccess(token);
+
+                                } catch (Exception e) {
+                                    callback.onFailure("Invalid login response");
+                                }
+                            }
+                        });
+
+                    } catch (Exception e) {
+                        callback.onFailure("Key parse error");
+                    }
                 }
             });
 
         } catch (Exception e) {
             callback.onFailure(e.getMessage());
         }
+    }
+
+    public static String encryptRSA(String plainText, String publicKeyStr) throws Exception {
+
+        publicKeyStr = publicKeyStr
+                .replace("-----BEGIN PUBLIC KEY-----", "")
+                .replace("-----END PUBLIC KEY-----", "")
+                .replaceAll("\\s", "");
+
+        byte[] keyBytes = android.util.Base64.decode(publicKeyStr, android.util.Base64.DEFAULT);
+
+        java.security.spec.X509EncodedKeySpec spec =
+                new java.security.spec.X509EncodedKeySpec(keyBytes);
+
+        java.security.KeyFactory kf = java.security.KeyFactory.getInstance("RSA");
+        java.security.PublicKey publicKey = kf.generatePublic(spec);
+
+        javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("RSA/ECB/PKCS1Padding");
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, publicKey);
+
+        byte[] encrypted = cipher.doFinal(plainText.getBytes("UTF-8"));
+
+        return android.util.Base64.encodeToString(encrypted, android.util.Base64.NO_WRAP);
     }
 
     public static String normalizeUrl(String inputUrl) {
@@ -95,7 +161,7 @@ public class AuthLogin {
         if (!inputUrl.endsWith("/")) {
             inputUrl += "/";
         }
-        inputUrl += "authentication/";
+        inputUrl += KEY_auth_api_path;
         Log.d(TAG,"Auth URL used " + inputUrl);
         return inputUrl;
     }

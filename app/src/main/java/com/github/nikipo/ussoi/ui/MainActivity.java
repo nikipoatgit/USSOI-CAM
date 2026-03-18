@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.hardware.usb.UsbDevice;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
@@ -30,8 +31,7 @@ import androidx.core.content.ContextCompat;
 import androidx.media3.common.util.UnstableApi;
 
 import com.github.nikipo.ussoi.hardware.bluetooth.BluetoothController;
-import com.github.nikipo.ussoi.hardware.usb.UsbBroadcastHandler;
-import com.github.nikipo.ussoi.hardware.usb.UsbController;
+import com.github.nikipo.ussoi.hardware.usb.UsbDeviceMonitor;
 import com.github.nikipo.ussoi.hardware.usb.UsbDriverController;
 import com.github.nikipo.ussoi.network.update.VersionChecker;
 import com.github.nikipo.ussoi.storage.StorageController;
@@ -49,12 +49,11 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
     private ServiceController serviceController;
-    private StorageController StorageController;
-    private UsbBroadcastHandler usbBroadcastHandler;
-    private UsbDriverController usbDriverController;
+    private StorageController storageController;
+    private UsbDeviceMonitor usbDeviceMonitor;
     private BluetoothController bluetoothController;
+    private UsbDriverController usbDriverController;
     private PowerController powerController;
-
     private SaveInputFields saveInputFields;
     private Logging logging;
     private SharedPreferences pref;
@@ -84,9 +83,8 @@ public class MainActivity extends AppCompatActivity {
         logging = Logging.getInstance(this);
 
         powerController = new PowerController(this);
-        usbDriverController = new UsbDriverController(this);
 
-        // ActivityResultLauncher  let  user pick directory
+        // ActivityResultLauncher lets user pick directory
         ActivityResultLauncher<Intent> pickLogFolderLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
             if (result.getResultCode() != RESULT_OK || result.getData() == null) {
                 Toast.makeText(this, "Storage folder is required for logging!", Toast.LENGTH_LONG).show();
@@ -97,19 +95,20 @@ public class MainActivity extends AppCompatActivity {
             Uri treeUri = result.getData().getData();
             if (treeUri == null) return;
 
-            StorageController.onFolderPicked(treeUri);
+            storageController.onFolderPicked(treeUri);
 
             if (!powerController.isIgnoringBatteryOptimizations()) {
                 showBatteryOptimizationNote();
             }
         });
 
-        // Storage Folder Permission Check , Dialog for folder selection
-        StorageController = new StorageController(this, saveInputFields, pickLogFolderLauncher);
-        if (!StorageController.init()) {
+        // Storage Folder Permission Check ,Dialog for folder selection
+        storageController = new StorageController(this, saveInputFields, pickLogFolderLauncher);
+        if (!storageController.init()) {
             Toast.makeText(this, "Storage initiation failed", Toast.LENGTH_LONG).show();
              logging.log( TAG + ": "   + "Storage initiation failed");
             this.finishAffinity();
+            return;
         }
 
          logging.log( TAG + ": "   + "Main Activity Created");
@@ -124,25 +123,28 @@ public class MainActivity extends AppCompatActivity {
         }
         permissionLauncher.launch(permissions);
 
-        // usb event display
-        UsbController usbController = new UsbController(this, usbInfoText);
-        usbBroadcastHandler = new UsbBroadcastHandler(this, usbController);
-        usbController.checkExistingDevices();
-        usbBroadcastHandler.register();
+        // usb event
+        usbDriverController = new UsbDriverController(this);
+        usbDeviceMonitor = new UsbDeviceMonitor(this,usbDriverController,new UsbDeviceMonitor.Listener() {
+            @Override
+            public void onDeviceConnected(UsbDevice device) {
+                runOnUiThread(() -> usbInfoText.setText(buildDeviceInfo(device)));
+            }
+            @Override
+            public void onDeviceDisconnected() {
+                runOnUiThread(() -> usbInfoText.setText("No USB device connected"));
+            }
+        });
+        usbDeviceMonitor.init();
 
+        // bt controller
         bluetoothController = new BluetoothController(this, permissionLauncher);
 
+        // foreground service
         serviceController = new ServiceController(this);
 
+        // update check
         VersionChecker.check(USSOI_version, text -> runOnUiThread(() -> versionTextField.setText(text)));
-
-        // short hand for
-        // new VersionChecker.Callback() {
-        //    @Override
-        //    public void onResult(String text) {
-        //        runOnUiThread(() -> versionTextField.setText(text));
-        //    }
-        //}
 
     }
 
@@ -150,14 +152,12 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        updateServiceButtonState(serviceController.isRunning());
     }
 
     @Override
     protected void onStop() {
         super.onStop();
-        usbBroadcastHandler.unregister();
-
+        usbDeviceMonitor.release();
     }
 
     private void initUi() {
@@ -227,7 +227,7 @@ public class MainActivity extends AppCompatActivity {
     @OptIn(markerClass = UnstableApi.class)
     private void handleServiceToggle() {
         if (serviceController.isRunning()) {
-            serviceController.stop();
+            serviceController.stop(serviceButton);
         } else {
             // Save inputs before starting
             String url = urlIp.getText().toString().trim();
@@ -249,23 +249,20 @@ public class MainActivity extends AppCompatActivity {
 
             // Branch based on connection type
             if (radioBt.isChecked()) {
-                bluetoothController.selectDevicesAndStart(() -> serviceController.start());
+                bluetoothController.selectDevicesAndStart(() -> serviceController.start(serviceButton));
 
             } else if (radioUsb.isChecked()) {
-                usbDriverController.selectAndStart(() -> serviceController.start());
+                usbDriverController.selectAndStart(() -> serviceController.start(serviceButton));
             } else {
-                serviceController.start();
+                serviceController.start(serviceButton);
             }
         }
 
 
     }
-
     private void updateServiceButtonState(boolean isRunning) {
         serviceButton.setText(isRunning ? "Stop Service" : "Start Service");
     }
-
-
     // bulk permission request handler
     private void setupPermissionLauncher() {
         permissionLauncher = registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), permissions -> {
@@ -289,6 +286,24 @@ public class MainActivity extends AppCompatActivity {
         }).show();
     }
 
+    private String buildDeviceInfo(UsbDevice device) {
+        android.hardware.usb.UsbManager mgr = (android.hardware.usb.UsbManager) getSystemService(USB_SERVICE);
 
+        String m = " ", p = " ", s = " ";
+        if (mgr != null && mgr.hasPermission(device)) {
+            s = device.getSerialNumber();
+            m = device.getManufacturerName();
+            p = device.getProductName();
+        }
+
+        return "Path: " + device.getDeviceName() + "\n" +
+                "VID : " + Integer.toHexString(device.getVendorId()) +
+                " PID : " + Integer.toHexString(device.getProductId()) + "\n" +
+                "USB: C/S/P = " + device.getDeviceClass() + "/" +
+                device.getDeviceSubclass() + "/" + device.getDeviceProtocol() + "\n" +
+                "Mfg: " + m + "\n" +
+                "Prod: " + p + "\n" +
+                "SN: " + s;
+    }
 }
 

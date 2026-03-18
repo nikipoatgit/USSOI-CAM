@@ -109,6 +109,35 @@ public class Logging {
         });
     }
 
+    public void logMsg(String tag,String message) {
+        if (logExecutor.isShutdown()) return;
+
+        final String ts =
+                new SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(new Date());
+
+        logExecutor.execute(() -> {
+            if (logFile == null) {
+                Log.e(TAG, "logFile not initialized yet");
+                return;
+            }
+            try (OutputStream os =
+                         context.getContentResolver()
+                                 .openOutputStream(logFile.getUri(), "wa");
+                 BufferedWriter writer =
+                         new BufferedWriter(
+                                 new OutputStreamWriter(os, StandardCharsets.UTF_8))) {
+
+                writer.write("[" + ts + "] , " + tag + " , " +  message);
+                writer.newLine();
+
+            }catch (SecurityException | IOException e) {
+                Log.e(TAG, "SAF permission revoked", e);
+                closeLogging();
+            }
+
+        });
+    }
+
     private String buildSessionLogFileName() {
         Date now = new Date();
 

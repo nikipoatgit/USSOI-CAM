@@ -4,13 +4,15 @@ import static com.github.nikipo.ussoi.storage.SaveInputFields.*;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.params.StreamConfigurationMap;
-import android.os.Build;
+import android.media.MediaRecorder;
 import android.util.Log;
+import android.util.Range;
 import android.util.Size;
+
+import androidx.annotation.NonNull;
 
 import com.github.nikipo.ussoi.media.highFpsH264.HighFPSCameraController;
 import com.github.nikipo.ussoi.system.DeviceInfo;
@@ -28,7 +30,7 @@ public class ConnRouter {
 
     // Static state variables
     private static boolean isParamsReceived;
-    private static ConnManager connManager;
+    private static ConnectionManager connManager;
     private static SaveInputFields saveInputFields;
     private static SharedPreferences prefs;
     private static Context ctx;
@@ -40,7 +42,7 @@ public class ConnRouter {
     /**
      * Replaces the constructor. Call this once in your main activity or service setup.
      */
-    public static void init(ConnManager sender, Context context) {
+    public static void init(ConnectionManager sender, Context context) {
         isParamsReceived = false;
         ctx = context;
         connManager = sender;
@@ -106,7 +108,12 @@ public class ConnRouter {
                 break;
 
             case "getCamRes":
-                logCameraResolutionsAsJson();
+                if (isParamsReceived && hasHighFpsCamera() && prefs.getBoolean(KEY_mse_high_fps_Enable,false)){
+                    connManager.send(getHighSpeedVideoResolutionsJson());
+                }
+                else{
+                    connManager.send(getNormalVideoResolutionsJson());
+                }
                 sendAck("ack", json.optInt("reqId", -1), "");
                 break;
             case "deviceInfo":
@@ -136,46 +143,46 @@ public class ConnRouter {
 
     private static void handleStreamLogic(JSONObject json) {
         int reqId = json.optInt("reqId", -1);
-//        if (prefs.getBoolean(KEY_webrtc_Enable, false) && json.optBoolean("webrtc", false)) {
-//            if (json.has("start")) {
-//                StreamRoute.stopStream();
-//                if (json.optBoolean("start", false)) {
-//                    StreamRoute.initWebrtc(connManager.getWebSocketHandlerObject());
-//                    sendAck("ack", reqId, "");
-//                } else {
-//                    sendAck("ack", reqId, "");
-//                }
-//            } else {
-//                StreamRoute.webrtcControl(json, prefs);
-//                sendAck("ack", json.optInt("reqId", -1), "");
-//            }
-//        } else if (prefs.getBoolean(KEY_mse_Enable, false) && json.optBoolean("mse", false)) {
-//            if (json.has("start")) {
-//                StreamRoute.stopStream();
-//                if (json.optBoolean("start", false)) {
-//                    StreamRoute.initMse();
-//                    sendAck("ack", reqId, "");
-//                } else {
-//                    sendAck("ack", reqId, "");
-//                }
-//            } else {
-//                StreamRoute.mseControl(json, prefs);
-//                sendAck("ack", json.optInt("reqId", -1), "");
-//            }
-//        }
-//       else if (prefs.getBoolean(KEY_mse_high_fps_Enable, false) && json.optBoolean("mse_high_fps", false)) {
-        if (true) {
+        if (prefs.getBoolean(KEY_webrtc_Enable, false) && json.optBoolean("webrtc", false)) {
             if (json.has("start")) {
                 StreamRoute.stopStream();
                 if (json.optBoolean("start", false)) {
-                    StreamRoute.initMseHighFps();
+                    StreamRoute.initWebrtc(connManager.getWebSocketHandlerObject());
                     sendAck("ack", reqId, "");
                 } else {
                     sendAck("ack", reqId, "");
                 }
             } else {
-                StreamRoute.mseHighFpsControl(json, prefs);
+                StreamRoute.webrtcControl(json, prefs);
                 sendAck("ack", json.optInt("reqId", -1), "");
+            }
+        } else if (prefs.getBoolean(KEY_mse_Enable, false) && json.optBoolean("mse", false)) {
+            if (prefs.getBoolean(KEY_mse_high_fps_Enable, false) && json.optBoolean("mse_high_fps", false)){
+                if (json.has("start")) {
+                    StreamRoute.stopStream();
+                    if (json.optBoolean("start", false)) {
+                        StreamRoute.initMseHighFps();
+                        sendAck("ack", reqId, "");
+                    } else {
+                        sendAck("ack", reqId, "");
+                    }
+                } else {
+                    StreamRoute.mseHighFpsControl(json, prefs);
+                    sendAck("ack", json.optInt("reqId", -1), "Mse High Fps");
+                }
+            } else if (!prefs.getBoolean(KEY_mse_high_fps_Enable, false) && !json.optBoolean("mse_high_fps", false)) {
+                if (json.has("start")) {
+                    StreamRoute.stopStream();
+                    if (json.optBoolean("start", false)) {
+                        StreamRoute.initMse();
+                        sendAck("ack", reqId, "");
+                    } else {
+                        sendAck("ack", reqId, "");
+                    }
+                } else {
+                    StreamRoute.mseControl(json, prefs);
+                    sendAck("ack", json.optInt("reqId", -1), "Mse");
+                }
             }
         }
     }
@@ -289,12 +296,13 @@ public class ConnRouter {
             reply.put("tunnelMode", status);
             reply.put("webrtc", prefs.getBoolean(KEY_webrtc_Enable, false));
             reply.put("mse", prefs.getBoolean(KEY_mse_Enable, false));
+            reply.put("mse_high_fps", prefs.getBoolean(KEY_mse_high_fps_Enable,false));
             reply.put("local", prefs.getBoolean(KEY_local_recording, false));
             reply.put("version", USSOI_version);
             reply.put("isParamsReceived", isParamsReceived);
             reply.put("record", record);
             reply.put("stream", stream);
-            reply.put("HighFpsSupport", getHighFpsCamerasJson());
+            reply.put("HighFpsSupport", hasHighFpsCamera());
             // TODO : SERVER SIDE IMPLEMENTATION REMAINING
         } catch (JSONException e) {
             logger.log(TAG + " getUserParams: " + Log.getStackTraceString(e));
@@ -302,89 +310,166 @@ public class ConnRouter {
         return reply;
     }
 
-    private static void logCameraResolutionsAsJson() {
-        CameraManager manager = (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
-        if (manager == null) return;
-
+    private static JSONObject getHighSpeedVideoResolutionsJson() {
         JSONObject root = new JSONObject();
         JSONArray cameraArray = new JSONArray();
 
         try {
+            CameraManager manager =
+                    (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
+            if (manager == null) return root;
+
             for (String cameraId : manager.getCameraIdList()) {
-                CameraCharacteristics chars = manager.getCameraCharacteristics(cameraId);
-                StreamConfigurationMap map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+
+                CameraCharacteristics chars =
+                        manager.getCameraCharacteristics(cameraId);
+
+                StreamConfigurationMap map =
+                        chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
                 if (map == null) continue;
 
                 JSONObject camObj = new JSONObject();
-                Integer facing = chars.get(CameraCharacteristics.LENS_FACING);
-                camObj.put("facing", facing == CameraCharacteristics.LENS_FACING_FRONT ? "front" : "back");
+                camObj.put("cameraId", cameraId);
 
-                JSONArray resArr = new JSONArray();
-                for (Size size : map.getOutputSizes(ImageFormat.JPEG)) {
-                    JSONObject res = new JSONObject();
-                    res.put("width", size.getWidth());
-                    res.put("height", size.getHeight());
-                    resArr.put(res);
-                }
+                Integer facing = chars.get(CameraCharacteristics.LENS_FACING);
+                camObj.put("facing",
+                        facing == CameraCharacteristics.LENS_FACING_FRONT ? "front" : "back");
+
+                JSONArray resArr = getJsonArray(map);
+
                 camObj.put("resolutions", resArr);
                 cameraArray.put(camObj);
             }
-            root.put("cameraResolutions", cameraArray);
+
             root.put("type", "camRes");
-            connManager.send(root);
-        } catch (Exception e) {
-            logger.log(TAG + " " + Log.getStackTraceString(e));
-        }
+            root.put("resType", "HighFpsRes");
+            root.put("cameraResolutions", cameraArray);
+
+        } catch (Exception ignored) {}
+
+        return root;
     }
 
-    private static JSONObject getHighFpsCamerasJson() {
-        JSONObject result = new JSONObject();
-        JSONArray camerasArray = new JSONArray();
+    @NonNull
+    private static JSONArray getJsonArray(StreamConfigurationMap map) throws JSONException {
+        JSONArray resArr = new JSONArray();
 
+        for (Size size : map.getHighSpeedVideoSizes()) {
+            JSONObject res = new JSONObject();
+            res.put("width", size.getWidth());
+            res.put("height", size.getHeight());
+
+            JSONArray fpsArr = new JSONArray();
+            for (Range<Integer> r :
+                    map.getHighSpeedVideoFpsRangesFor(size)) {
+
+                JSONObject fps = new JSONObject();
+                fps.put("min", r.getLower());
+                fps.put("max", r.getUpper());
+                fpsArr.put(fps);
+            }
+
+            res.put("fpsRanges", fpsArr);
+            resArr.put(res);
+        }
+        return resArr;
+    }
+
+    private static JSONObject getNormalVideoResolutionsJson() {
+        JSONObject root = new JSONObject();
+        JSONArray cameraArray = new JSONArray();
+
+        try {
+            CameraManager manager =
+                    (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
+            if (manager == null) return root;
+
+            for (String cameraId : manager.getCameraIdList()) {
+
+                CameraCharacteristics chars =
+                        manager.getCameraCharacteristics(cameraId);
+
+                StreamConfigurationMap map =
+                        chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                if (map == null) continue;
+
+                JSONObject camObj = new JSONObject();
+                camObj.put("cameraId", cameraId);
+
+                Integer facing = chars.get(CameraCharacteristics.LENS_FACING);
+                camObj.put("facing",
+                        facing == CameraCharacteristics.LENS_FACING_FRONT ? "front" : "back");
+
+                JSONArray resArr = new JSONArray();
+
+                Range<Integer>[] fpsRanges =
+                        chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+
+                for (Size size : map.getOutputSizes(MediaRecorder.class)) {
+                    JSONObject res = getJsonObject(size, fpsRanges);
+                    resArr.put(res);
+                }
+
+                camObj.put("resolutions", resArr);
+                cameraArray.put(camObj);
+            }
+
+            root.put("type", "camRes");
+            root.put("resType", "NormalRes");
+            root.put("cameraResolutions", cameraArray);
+
+        } catch (Exception ignored) {}
+
+        return root;
+    }
+
+    @NonNull
+    private static JSONObject getJsonObject(Size size, Range<Integer>[] fpsRanges) throws JSONException {
+        JSONObject res = new JSONObject();
+        res.put("width", size.getWidth());
+        res.put("height", size.getHeight());
+
+        JSONArray fpsArr = new JSONArray();
+        if (fpsRanges != null) {
+            for (Range<Integer> r : fpsRanges) {
+                JSONObject fps = new JSONObject();
+                fps.put("min", r.getLower());
+                fps.put("max", r.getUpper());
+                fpsArr.put(fps);
+            }
+        }
+
+        res.put("fpsRanges", fpsArr);
+        return res;
+    }
+
+    private static boolean hasHighFpsCamera() {
         try {
             CameraManager manager =
                     (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
 
             if (manager == null) {
-                result.put("error", "CameraManager unavailable");
-                return result;
+                return false;
             }
 
             for (String cameraId : manager.getCameraIdList()) {
-
 
                 Object caps =
                         HighFPSCameraController.getHighSpeedCapabilities(ctx, cameraId);
 
                 if (caps != null) {
-                    JSONObject cam = new JSONObject();
-                    cam.put("cameraId", cameraId);
-                    camerasArray.put(cam);
-
                     Log.d(TAG, "High-FPS camera found: " + cameraId);
+                    return true;
                 }
             }
 
-            result.put("type", "cameraCapabilities");
-            result.put("highFpsCameras", camerasArray);
-            result.put("count", camerasArray.length());
-
-            if (camerasArray.length() == 0) {
-                result.put("note", "No high-FPS cameras supported");
-            }
-
         } catch (Exception e) {
-            try {
-                result.put("error", e.getMessage());
-            } catch (Exception ignored) {
-            }
-            logger.log(TAG + ": Error querying cameras" + e);
+            logger.log(TAG + ": Error querying cameras " + e);
             Log.e(TAG, "Error querying cameras", e);
         }
 
-        return result;
+        return false;
     }
-
 
     public static void sendAck(String type, int reqId, String msg) {
         try {

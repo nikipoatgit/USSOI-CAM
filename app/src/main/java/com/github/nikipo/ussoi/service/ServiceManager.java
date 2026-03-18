@@ -26,16 +26,12 @@ import androidx.lifecycle.LifecycleOwner;
 import androidx.lifecycle.ServiceLifecycleDispatcher;
 import androidx.media3.common.util.UnstableApi;
 
-import com.github.nikipo.ussoi.system.DeviceInfo;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.service.control.AuthLogin;
-import com.github.nikipo.ussoi.service.control.ConnManager;
+import com.github.nikipo.ussoi.service.control.ConnectionManager;
 
 import org.jetbrains.annotations.Nullable;
-
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 
 @UnstableApi
 public class ServiceManager extends Service implements LifecycleOwner {
@@ -46,7 +42,7 @@ public class ServiceManager extends Service implements LifecycleOwner {
     private SaveInputFields saveInputFields;
     private Logging logger;
     public volatile static boolean isRunning = false;
-    private ConnManager connectionManager;
+    private ConnectionManager connectionManager;
 
     @Override
     public void onCreate() {
@@ -131,7 +127,7 @@ public class ServiceManager extends Service implements LifecycleOwner {
     }
 
     private void initiateConnection() {
-        connectionManager = ConnManager.getInstance(this, KEY_api_path);
+        connectionManager = ConnectionManager.getInstance(this, KEY_api_path);
         connectionManager.connect();
         logger.log(TAG + ": ConnManager connected and Scheduler initialized");
 

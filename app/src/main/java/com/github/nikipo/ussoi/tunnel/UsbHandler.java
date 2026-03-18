@@ -15,6 +15,7 @@ import android.os.Looper;
 import android.util.Log;
 import android.widget.Toast;
 
+import com.github.nikipo.ussoi.hardware.usb.UsbDriverController;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 import com.github.nikipo.ussoi.network.WebSocketHandler;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
@@ -24,6 +25,8 @@ import com.hoho.android.usbserial.driver.UsbSerialPort;
 
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 
 public class UsbHandler {
@@ -31,7 +34,7 @@ public class UsbHandler {
     private static UsbHandler instance;
     private SharedPreferences prefs;
     private SaveInputFields saveInputFields;
-    private static UsbManager usbManager;
+    private UsbManager usbManager;
     private WebSocketHandler webSocketHandler;
     private Thread readThread;
     private volatile boolean reading = false;
@@ -40,10 +43,13 @@ public class UsbHandler {
     private Logging logging;
     private UsbSerialDriver driver ;
     private UsbSerialPort port;
+    private String usbName;
+    private int baudRate;
     private int timeOut = 100;
     private UsbHandler(Context context){
         this.context = context.getApplicationContext();
-        usbManager = (UsbManager) this.context.getSystemService(Context.USB_SERVICE);
+        this.usbManager = (UsbManager) this.context.getSystemService(Context.USB_SERVICE);
+        this.baudRate = 115200;
     };
     public static synchronized UsbHandler getInstance(Context context){
         if (instance == null){
@@ -91,7 +97,7 @@ public class UsbHandler {
         try {
             port.open(connection);
 
-            int baud = prefs.getInt(KEY_BAUD_RATE, 115200);
+            int baud = baudRate;
 
             timeOut = usbWriteTimeoutMs(baud);
 
@@ -170,14 +176,14 @@ public class UsbHandler {
         if (baud >= 19200)  return 300;
         return 500; // ≤ 9600
     }
-    public void setDriver(UsbSerialDriver d) {
-        this.driver = d;
-        UsbDevice dev = d.getDevice();
+    public void setDeviceConfig(UsbSerialDriver driver, String name, int baudRate) {
+        this.driver = driver;
+        this.usbName = name;
+        this.baudRate = baudRate;
     }
     public void clearDriver() {
         this.driver = null;
     }
-
     public boolean isRunning(){
         return reading;
     }
@@ -208,8 +214,6 @@ public class UsbHandler {
         }, "UsbReadLoop");
         readThread.start();
     }
-
-
     private void stopReading() {
         reading = false;
         if (readThread != null) {

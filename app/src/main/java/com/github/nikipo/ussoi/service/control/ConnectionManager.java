@@ -6,30 +6,28 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import com.github.nikipo.ussoi.system.ClientInfoProvider;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.network.WebSocketHandler;
+import com.github.nikipo.ussoi.system.telemetry.SysTelemetry;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 
-public class ConnManager {
+public class ConnectionManager {
     private static final String TAG = "ControlConnectionManager";
     private final Context context;
     private final String wsUrl;
-
-    private static volatile ConnManager instance;
-
+    private static volatile ConnectionManager instance;
     private ImpClientInfoSender impClientInfoSender;
     private WebSocketHandler webSocketHandler;
-    private ClientInfoProvider clientInfoProvider;
+    private SysTelemetry sysTelemetry;
     private SharedPreferences prefs;
     private SaveInputFields saveInputFields;
     private Logging logger;
     static final String KEY_Session_KEY = "sessionKey";
 
-    private ConnManager(Context ctx, String url) {
+    private ConnectionManager(Context ctx, String url) {
         this.context = ctx.getApplicationContext();
         this.wsUrl = url;
 
@@ -39,9 +37,9 @@ public class ConnManager {
         this.prefs = saveInputFields.get_shared_pref();
     }
 
-    public static ConnManager getInstance(Context ctx, String url){
+    public static ConnectionManager getInstance(Context ctx, String url){
         if (instance == null){
-           instance = new ConnManager(ctx,url);
+           instance = new ConnectionManager(ctx,url);
         }
         return instance;
     }
@@ -52,9 +50,12 @@ public class ConnManager {
     }
 
     public void connect() {
-        clientInfoProvider = ClientInfoProvider.getInstance(context);
+
+        // create info  object
+        sysTelemetry = SysTelemetry.getInstance(context);
+
         new Handler(Looper.getMainLooper()).post(() -> {
-            clientInfoProvider.startMonitoring();
+            sysTelemetry.startMonitoring();
         });
 
         webSocketHandler = new WebSocketHandler(context,new WebSocketHandler.MessageCallback() {
@@ -62,7 +63,7 @@ public class ConnManager {
             public void onOpen() {
                 logger.log(TAG + ": WS Connected");
                 if (impClientInfoSender == null) {
-                    impClientInfoSender = new ImpClientInfoSender(webSocketHandler, clientInfoProvider,ConnManager.this,logger);
+                    impClientInfoSender = new ImpClientInfoSender(webSocketHandler, sysTelemetry, ConnectionManager.this,logger);
                 }
                 impClientInfoSender.startSending();
             }
@@ -116,8 +117,8 @@ public class ConnManager {
             webSocketHandler = null;
         }
 
-        if (clientInfoProvider != null) {
-            clientInfoProvider.stopMonitoring();
+        if (sysTelemetry != null) {
+            sysTelemetry.stopMonitoring();
         }
 
         ConnRouter.stopAllServices();
@@ -126,15 +127,15 @@ public class ConnManager {
     // issue if
     private static class ImpClientInfoSender {
         private final WebSocketHandler webSocketHandler;
-        private final ClientInfoProvider clientInfoProvider;
-        private final ConnManager sender;
+        private final SysTelemetry telemetry;
+        private final ConnectionManager sender;
         private volatile boolean running = false;
         private Thread worker;
         private Logging logger;
 
-        ImpClientInfoSender(WebSocketHandler handler, ClientInfoProvider provider,ConnManager connManager,Logging logger) {
+        ImpClientInfoSender(WebSocketHandler handler, SysTelemetry provider, ConnectionManager connManager, Logging logger) {
             this.webSocketHandler = handler;
-            this.clientInfoProvider = provider;
+            this.telemetry = provider;
             this.sender = connManager;
             this.logger = logger;
         }
@@ -157,7 +158,7 @@ public class ConnManager {
                         // Build combined status object
                         JSONObject obj = new JSONObject();
                         obj.put("type", "clientStats");
-                        obj.put("hex", clientInfoProvider.getClientStats()+ ConnRouter.getClientStat());
+                        obj.put("hex", telemetry.getPacket()+ ConnRouter.getClientStat());
 
                         sender.send(obj);
                         Thread.sleep(3000);

@@ -8,20 +8,14 @@ import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.widget.Toast;
-
-import androidx.appcompat.app.AlertDialog;
-
 import com.github.nikipo.ussoi.tunnel.UsbHandler;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
-
-import java.util.ArrayList;
 import java.util.List;
 
 public final class UsbDriverController {
 
-    private static final String ACTION_USB_PERMISSION =
-            "com.github.nikipo.ussoi.USB_PERMISSION";
+    static final String ACTION_USB_PERMISSION ="com.github.nikipo.ussoi.USB_PERMISSION";
 
     private final Activity activity;
     private final UsbManager usbManager;
@@ -29,51 +23,39 @@ public final class UsbDriverController {
 
     public UsbDriverController(Activity activity) {
         this.activity = activity;
-        this.usbManager =
-                (UsbManager) activity.getSystemService(Context.USB_SERVICE);
+        this.usbManager =(UsbManager) activity.getSystemService(Context.USB_SERVICE);
         this.usbHandler = UsbHandler.getInstance(activity);
     }
-
-    public void selectAndStart(Runnable onReady) {
-
+    public interface OnComplete {
+        void run();
+    }
+    public void selectAndStart(OnComplete onComplete) {
         List<UsbSerialDriver> drivers =
                 UsbSerialProber.getDefaultProber().findAllDrivers(usbManager);
 
         if (drivers.isEmpty()) {
-            Toast.makeText(activity,
-                    "No USB serial drivers available",
-                    Toast.LENGTH_SHORT).show();
+            Toast.makeText(activity, "No USB serial devices found", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        List<String> labels = new ArrayList<>();
-        for (UsbSerialDriver d : drivers) {
-            UsbDevice dev = d.getDevice();
-            labels.add(
-                    "VID: " + Integer.toHexString(dev.getVendorId()) +
-                            " PID: " + Integer.toHexString(dev.getProductId()) +
-                            " Ports: " + d.getPorts().size()
-            );
-        }
-
-        new AlertDialog.Builder(activity)
-                .setTitle("Select USB Device")
-                .setItems(labels.toArray(new String[0]), (d, which) -> {
-                    UsbSerialDriver driver = drivers.get(which);
+        UsbSetupDialog.show(
+                ((androidx.fragment.app.FragmentActivity) activity).getSupportFragmentManager(),
+                drivers,
+                (driver, name, baudRate) -> {
                     UsbDevice device = driver.getDevice();
-                    usbHandler.setDriver(driver);
 
                     if (!usbManager.hasPermission(device)) {
                         requestPermission(device);
-                    } else {
-                        onReady.run();
+                        return;
                     }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+
+                    usbHandler.setDeviceConfig(driver, name, baudRate);
+                    onComplete.run();
+                }
+        );
     }
 
-    private void requestPermission(UsbDevice device) {
+    void requestPermission(UsbDevice device) {
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
             flags |= PendingIntent.FLAG_MUTABLE;
