@@ -1,4 +1,4 @@
-package com.github.nikipo.ussoi.system;
+package com.github.nikipo.ussoi.hardware.usb;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -8,8 +8,7 @@ import android.hardware.usb.UsbManager;
 
 public class UsbAttachReceiver extends BroadcastReceiver {
 
-    public static final String ACTION_USB_EVENT =
-            "com.github.nikipo.ussoi.USB_EVENT";
+    public static final String ACTION_USB_EVENT ="com.github.nikipo.ussoi.USB_EVENT";
 
     @Override
     public void onReceive(Context context, Intent intent) {

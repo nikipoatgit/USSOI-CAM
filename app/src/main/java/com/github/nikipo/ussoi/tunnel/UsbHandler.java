@@ -1,9 +1,8 @@
 package com.github.nikipo.ussoi.tunnel;
 
 
-import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_BAUD_RATE;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Session_KEY;
-import static com.github.nikipo.ussoi.storage.SaveInputFields.UART_TUNNEL;
+import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_data_api_path;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -15,7 +14,6 @@ import android.os.Looper;
 import android.util.Log;
 import android.widget.Toast;
 
-import com.github.nikipo.ussoi.hardware.usb.UsbDriverController;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 import com.github.nikipo.ussoi.network.WebSocketHandler;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
@@ -23,176 +21,234 @@ import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 
 
+import org.json.JSONArray;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Arrays;
 
 
-public class UsbHandler {
+public class UsbHandler implements Tunnel {
+
     private static final String TAG = "UsbHandler";
+
+    // -------------------------------------------------------------------------
+    // Singleton
+    // -------------------------------------------------------------------------
+
     private static UsbHandler instance;
-    private SharedPreferences prefs;
-    private SaveInputFields saveInputFields;
-    private UsbManager usbManager;
-    private WebSocketHandler webSocketHandler;
-    private Thread readThread;
-    private volatile boolean reading = false;
-    private final Object usbLock = new Object();
-    private Context context;
-    private Logging logging;
-    private UsbSerialDriver driver ;
-    private UsbSerialPort port;
-    private String usbName;
-    private int baudRate;
-    private int timeOut = 100;
-    private UsbHandler(Context context){
-        this.context = context.getApplicationContext();
+
+    private UsbHandler(Context context) {
+        this.context    = context.getApplicationContext();
         this.usbManager = (UsbManager) this.context.getSystemService(Context.USB_SERVICE);
-        this.baudRate = 115200;
-    };
-    public static synchronized UsbHandler getInstance(Context context){
-        if (instance == null){
+        this.baudRate   = 115200;
+    }
+
+    public static synchronized UsbHandler getInstance(Context context) {
+        if (instance == null) {
             instance = new UsbHandler(context);
         }
         return instance;
     }
-    private void showToast(String message) {
-        new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(context, message, Toast.LENGTH_SHORT).show());
-    }
-    public void setupConnection(){
+
+    // -------------------------------------------------------------------------
+    // Fields
+    // -------------------------------------------------------------------------
+
+    private final Object      usbLock    = new Object();
+    private final Context     context;
+    private final UsbManager  usbManager;
+
+    private SharedPreferences  prefs;
+    private SaveInputFields    saveInputFields;
+    private WebSocketHandler   webSocketHandler;
+    private Logging            logging;
+
+    private UsbSerialDriver    driver;
+    private UsbSerialPort      port;
+    private String             usbName;
+    private int                baudRate;
+    private int                timeOut = 100;
+
+    private Thread             readThread;
+    private volatile boolean   reading = false;
+
+    // -------------------------------------------------------------------------
+    // Tunnel interface
+    // -------------------------------------------------------------------------
+
+    @Override
+    public void init() {
         saveInputFields = SaveInputFields.getInstance(context);
-        logging = Logging.getIfInitialized();
-        prefs = saveInputFields.get_shared_pref();
+        logging         = Logging.getIfInitialized();
+        prefs           = saveInputFields.get_shared_pref();
 
-
-        if (driver == null){
-            Log.w(TAG, " driver id null");
-            logging.log(TAG + " driver id null");
-            showToast( "driver id null");
-
-            return;
-        }
-
+        if (!checkDriver())                         return;
         UsbDevice device = driver.getDevice();
+        if (!checkPermission(device))               return;
+        UsbDeviceConnection connection = openConnection(device);
+        if (connection == null)                     return;
+        if (!openPort(connection, device))          return;
 
-        if (!usbManager.hasPermission(device)) {
-            logging.log(TAG + " NO USB permission for device");
-            showToast( "No USB permission for device");
-            Log.d(TAG, "No USB permission for device");
-            return;
+        setupWebSocket();
+        startReading(port);
+    }
+
+    @Override
+    public void close() {
+        logging.log(TAG + " USB services stopped");
+        stopReading();
+
+        // Closing order matters: WebSocket before port
+        if (webSocketHandler != null) {
+            webSocketHandler.closeConnection();
+            webSocketHandler = null;
+            Log.d(TAG, "Socket closed");
         }
 
+        if (port != null) {
+            try {
+                port.close();
+                Log.d(TAG, "Port closed");
+            } catch (IOException ignored) {}
+            port = null;
+        }
+    }
 
+    @Override
+    public boolean isTunnelRunning() {
+        return false;
+    }
+
+    @Override
+    public String getTunnelName() {
+        return usbName;
+    }
+
+    // -------------------------------------------------------------------------
+    // Configuration
+    // -------------------------------------------------------------------------
+
+    public void setDeviceConfig(UsbSerialDriver driver, String name, int baudRate) {
+        this.driver   = driver;
+        this.usbName  = name;
+        this.baudRate = baudRate;
+    }
+
+    public void clearDriver() {
+        this.driver = null;
+    }
+
+    // -------------------------------------------------------------------------
+    // Private helpers — init steps
+    // -------------------------------------------------------------------------
+
+    private boolean checkDriver() {
+        if (driver != null) return true;
+        Log.w(TAG, "Driver is null");
+        logging.log(TAG + " Driver is null");
+        showToast("Driver is null");
+        return false;
+    }
+
+    private boolean checkPermission(UsbDevice device) {
+        if (usbManager.hasPermission(device)) return true;
+        Log.d(TAG, "No USB permission for device");
+        logging.log(TAG + " No USB permission for device");
+        showToast("No USB permission for device");
+        return false;
+    }
+
+    private UsbDeviceConnection openConnection(UsbDevice device) {
         UsbDeviceConnection connection = usbManager.openDevice(device);
-        if (connection == null) {
-            logging.log(TAG + " Failed to open USB device connection");
-            Log.e(TAG, "Failed to open USB device connection");
-            showToast("Failed to open USB device connection");
-            return;
-        }
+        if (connection != null) return connection;
+        Log.e(TAG, "Failed to open USB device connection");
+        logging.log(TAG + " Failed to open USB device connection");
+        showToast("Failed to open USB device connection");
+        return null;
+    }
 
-        port = driver.getPorts().get(0);
+    /** Opens the serial port and configures baud/framing. Returns false on failure. */
+    private boolean openPort(UsbDeviceConnection connection, UsbDevice device) {
+        port    = driver.getPorts().get(0);
+        timeOut = usbWriteTimeoutMs(baudRate);
 
         try {
             port.open(connection);
+            port.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
 
-            int baud = baudRate;
-
-            timeOut = usbWriteTimeoutMs(baud);
-
-            port.setParameters(baud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
-
-            String serialCfg =
-                    "USB SERIAL CONFIG | " +
-                            "baud=" + baud +
-                            ", dataBits=8" +
-                            ", stopBits=1" +
-                            ", parity=NONE";
-
-            logging.log(
-                    TAG + " USB SERIAL CONFIG | " +
-                            "VID=0x" + Integer.toHexString(device.getVendorId()) +
-                            ", PID=0x" + Integer.toHexString(device.getProductId()) +
-                            ", baud=" + baud +
-                            ", 8N1"
-            );
-
+            String serialCfg = "USB SERIAL CONFIG | baud=" + baudRate + ", dataBits=8, stopBits=1, parity=NONE";
             Log.i(TAG, serialCfg);
             logging.log(TAG + " " + serialCfg);
+            logging.log(TAG + " VID=0x" + Integer.toHexString(device.getVendorId())
+                    + ", PID=0x" + Integer.toHexString(device.getProductId())
+                    + ", baud=" + baudRate + ", 8N1");
+            return true;
+
         } catch (IOException e) {
-            String err = "USB SERIAL CONFIG FAILED";
-            Log.e(TAG, err, e);
-            logging.log(TAG + " " + err + " : " + e.getMessage());
-
-            try {
-                port.close();
-            } catch (IOException closeErr) {
-                Log.w(TAG, "USB port close failed", closeErr);
-                logging.log(TAG + " USB port close failed");
-            }
-            return;
+            Log.e(TAG, "USB SERIAL CONFIG FAILED", e);
+            logging.log(TAG + " USB SERIAL CONFIG FAILED: " + e.getMessage());
+            tryClosePort();
+            return false;
         }
+    }
 
-        webSocketHandler = new WebSocketHandler(context,new WebSocketHandler.MessageCallback() {
+    private void tryClosePort() {
+        if (port == null) return;
+        try {
+            port.close();
+        } catch (IOException e) {
+            Log.w(TAG, "USB port close failed", e);
+            logging.log(TAG + " USB port close failed");
+        }
+    }
+
+    private void setupWebSocket() {
+        webSocketHandler = new WebSocketHandler(context, new WebSocketHandler.MessageCallback() {
+            @Override
             public void onOpen() {
                 Log.d(TAG, "Connected to WS");
             }
 
             @Override
-            public void onPayloadReceivedText(String payload) {
-            }
+            public void onPayloadReceivedText(String payload) {}
+
             @Override
-            public void onPayloadReceivedByte(byte[] mavlinkBytes) {
-                try {
-                    synchronized (usbLock) {
-                        if (port != null) {
-                            port.write(mavlinkBytes, timeOut);
-                        }
+            public void onPayloadReceivedByte(byte[] byteData) {
+                synchronized (usbLock) {
+                    if (port == null) return;
+                    try {
+                        port.write(byteData, timeOut);
+                    } catch (IOException e) {
+                        Log.e(TAG, "Error writing to USB port from WebSocket", e);
+                        logging.log(TAG + " Error writing to USB port from WebSocket: " + e);
                     }
-                } catch (IOException e) {
-               //     stopAllServices();
-                    Log.e(TAG, "Error writing to USB port from WebSocket", e);
-                    logging.log(TAG + " Error writing to USB port from WebSocket"+ e);
                 }
             }
+
             @Override
             public void onClosed() {
-                Log.d(TAG, "WS connection closed: " );
+                Log.d(TAG, "WS connection closed");
             }
 
             @Override
             public void onError(String error) {
-                Log.e(TAG, "Error : " + error);
+                Log.e(TAG, "WS error: " + error);
             }
         });
-        webSocketHandler.setupConnection(UART_TUNNEL,prefs.getString(KEY_Session_KEY,"block"));
-        startReading(port);
+
+        webSocketHandler.setupConnection(KEY_data_api_path, prefs.getString(KEY_Session_KEY, "block"));
     }
-    private static int usbWriteTimeoutMs(int baud) {
-        if (baud >= 115200) return 100;
-        if (baud >= 57600)  return 150;
-        if (baud >= 38400)  return 200;
-        if (baud >= 19200)  return 300;
-        return 500; // ≤ 9600
-    }
-    public void setDeviceConfig(UsbSerialDriver driver, String name, int baudRate) {
-        this.driver = driver;
-        this.usbName = name;
-        this.baudRate = baudRate;
-    }
-    public void clearDriver() {
-        this.driver = null;
-    }
-    public boolean isRunning(){
-        return reading;
-    }
+
+    // -------------------------------------------------------------------------
+    // Private helpers — read loop
+    // -------------------------------------------------------------------------
+
     private void startReading(UsbSerialPort port) {
         stopReading();
         reading = true;
 
         readThread = new Thread(() -> {
-            byte[] buffer = new byte[4096]; // allocate buffer
+            byte[] buffer              = new byte[4096];
             final int READ_WAIT_MILLIS = 1000;
 
             while (reading) {
@@ -200,20 +256,19 @@ public class UsbHandler {
                     if (port == null) break;
                     int len = port.read(buffer, READ_WAIT_MILLIS);
                     if (len > 0) {
-                        byte[] mavlinkBytes = java.util.Arrays.copyOf(buffer, len);
-                        webSocketHandler.connSendPayloadBytes(mavlinkBytes);
+                        webSocketHandler.connSendPayloadBytes(Arrays.copyOf(buffer, len));
                     }
                 } catch (IOException e) {
-                //    stopAllServices();
-                    logging.log(TAG + " Error Reading to USB port from WebSocket"+ e);
+                    logging.log(TAG + " Error reading from USB port: " + e);
                     break;
-
                 }
             }
             reading = false;
         }, "UsbReadLoop");
+
         readThread.start();
     }
+
     private void stopReading() {
         reading = false;
         if (readThread != null) {
@@ -221,26 +276,22 @@ public class UsbHandler {
             readThread = null;
         }
     }
-    public void stopAllServices(){
-        logging.log(TAG + " USB services Stopped");
-        stopReading();
 
-        // here closing order matters
-        if (webSocketHandler != null ) {
-            webSocketHandler.closeConnection();
-            webSocketHandler = null;
-            Log.d(TAG,"socket closed");
+    // -------------------------------------------------------------------------
+    // Utility
+    // -------------------------------------------------------------------------
 
-        }
+    private void showToast(String message) {
+        new Handler(Looper.getMainLooper()).post(() ->
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show());
+    }
 
-            if (port != null) {
-                try {
-                    port.close();
-                    Log.d(TAG,"port closed");
-                } catch (IOException ignored) {}
-                port = null;
-            }
-
-
+    private static int usbWriteTimeoutMs(int baud) {
+        if (baud >= 115200) return 100;
+        if (baud >= 57600)  return 150;
+        if (baud >= 38400)  return 200;
+        if (baud >= 19200)  return 300;
+        return 500;
     }
 }
+

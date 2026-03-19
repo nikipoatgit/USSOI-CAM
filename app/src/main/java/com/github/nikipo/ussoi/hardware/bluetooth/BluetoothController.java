@@ -51,6 +51,12 @@ public final class BluetoothController {
             return;
         }
 
+        if (ActivityCompat.checkSelfPermission(activity, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(activity,
+                    "No Bluetooth Permission",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
         Set<BluetoothDevice> paired = adapter.getBondedDevices();
         if (paired.isEmpty()) {
             Toast.makeText(activity,

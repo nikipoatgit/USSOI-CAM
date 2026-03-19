@@ -1,6 +1,5 @@
 package com.github.nikipo.ussoi.webrtc;
 
-import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_LocalVideoBitrate;
 
 import android.Manifest;
 import android.content.Context;

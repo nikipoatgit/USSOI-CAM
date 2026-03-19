@@ -25,28 +25,21 @@ public  class SaveInputFields {
 
     // --- Network & Connectivity ---
     public static final String KEY_url          = "ip";
-    public static final String KEY_api_path     = "control/client";
+    public static final String KEY_control_api_path = "/ws/device/control";
     public static final String KEY_auth_api_path = "api/device/authenticate";
-    public static final String streamingUrl     = "mse/client";
-    public static final String UART_TUNNEL = "ws/uartunnel?mode=fc";
-    public static final String KEY_turn_array   = "turnArray";
+    public static final String KEY_stream_api_path = "/ws/device/mse";
+    public static final String KEY_data_api_path = "/ws/device/data";
+    public static final String KEY_turn_list = "turnArray";
 
     // --- Feature Toggles (Switches) ---
-    public static final String KEY_webrtc_Enable   = "webrtc";
-    public static final String KEY_mse_Enable      = "mse";
-    public static final String KEY_mse_high_fps_Enable      = "mse_high_fps";
-    public static final String KEY_local_recording = "localRecording";
-    public static final String KEY_BT_SWITCH       = "btEnable";
-    public static final String KEY_USB_Switch      = "usb";
-
-    // --- Video & Stream Configuration ---
-    public static final String KEY_LocalVideoBitrate = "localVideoBitrate";
-    public static final String KEY_BAUD_RATE         = "baud_rate";
+    public static final String KEY_BT_SWITCH  = "bt";
+    public static final String KEY_USB_Switch  = "usb";
 
     // --- Session & Authentication ---
     public static final String KEY_RoomID       = "roomId";
     public static final String KEY_RoomPWD      = "roomPwd";
     public static final String KEY_Session_KEY  = "sessionKey";
+    public static final String KEY_Device_Id  = "deviceId";
 
     // Misc
     public static final String MASK = "••••••••";

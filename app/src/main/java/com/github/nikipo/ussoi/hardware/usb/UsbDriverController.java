@@ -4,10 +4,13 @@ import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.widget.Toast;
+
+import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.tunnel.UsbHandler;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
@@ -25,6 +28,9 @@ public final class UsbDriverController {
         this.activity = activity;
         this.usbManager =(UsbManager) activity.getSystemService(Context.USB_SERVICE);
         this.usbHandler = UsbHandler.getInstance(activity);
+
+        // make sure previous connected device is cleared usbHandler is singleton
+        usbHandler.clearDriver();
     }
     public interface OnComplete {
         void run();

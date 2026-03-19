@@ -28,7 +28,7 @@ public class AuthLogin {
     private final OkHttpClient client = new OkHttpClient();
 
     public interface LoginCallback {
-        void onSuccess(String sessionKey);
+        void onSuccess(String sessionKey,String deviceId);
         void onFailure(String error);
     }
 
@@ -111,7 +111,7 @@ public class AuthLogin {
                                     }
 
                                     String token = resp.getString("deviceToken");
-                                    callback.onSuccess(token);
+                                    callback.onSuccess(token,deviceId);
 
                                 } catch (Exception e) {
                                     callback.onFailure("Invalid login response");

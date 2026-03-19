@@ -31,7 +31,7 @@ public class ConnectionManager {
         this.context = ctx.getApplicationContext();
         this.wsUrl = url;
 
-        ConnRouter.init(this, ctx);
+        ConnRouter1.init(this, ctx);
         logger = Logging.getInstance(context);
         saveInputFields = SaveInputFields.getInstance(ctx);
         this.prefs = saveInputFields.get_shared_pref();
@@ -72,7 +72,7 @@ public class ConnectionManager {
             public void onPayloadReceivedText(String payload) {
                 try {
                     JSONObject json = new JSONObject(payload);
-                    ConnRouter.route(json);
+                    ConnRouter1.route(json);
                     logger.log(TAG+" INCOMING :"+ json);
                 } catch (Exception e) {
                     logger.log(TAG + ": Bad JSON");
@@ -121,7 +121,7 @@ public class ConnectionManager {
             sysTelemetry.stopMonitoring();
         }
 
-        ConnRouter.stopAllServices();
+        ConnRouter1.stopAllServices();
     }
 
     // issue if
@@ -157,8 +157,8 @@ public class ConnectionManager {
 
                         // Build combined status object
                         JSONObject obj = new JSONObject();
-                        obj.put("type", "clientStats");
-                        obj.put("hex", telemetry.getPacket()+ ConnRouter.getClientStat());
+                        obj.put("type", "telem");
+                        obj.put("hex", telemetry.getPacket()+ ConnRouter1.getClientStat());
 
                         sender.send(obj);
                         Thread.sleep(3000);

@@ -1,11 +1,12 @@
 package com.github.nikipo.ussoi.tunnel;
 
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Session_KEY;
-import static com.github.nikipo.ussoi.storage.SaveInputFields.UART_TUNNEL;
+import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_data_api_path;
 
 import android.Manifest;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothSocket;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -24,156 +25,202 @@ import com.psp.bluetoothlibrary.BluetoothListener;
 import com.psp.bluetoothlibrary.Connection;
 import com.psp.bluetoothlibrary.SendReceive;
 
-public class BluetoothHandler {
+import org.json.JSONArray;
+
+public class BluetoothHandler implements Tunnel {
+
     public static final String ACTION_BT_FAILED = "com.example.ussoi.BT_CONNECTION_FAILED";
-    private static final String TAG = "BtHandel";
-    private Context context;
-    private BluetoothDevice device;
-    private Connection connection;
+    private static final String TAG = "BtHandler";
+
+    // -------------------------------------------------------------------------
+    // Fields
+    // -------------------------------------------------------------------------
+
+    private final Context         context;
+    private final Connection      connection;
+    private final SaveInputFields saveInputFields;
+
+    private BluetoothDevice  device;
     private WebSocketHandler webSocketHandler;
-    private SaveInputFields saveInputFields;
-    private boolean isRunning = false;
+    private boolean          isRunning = false;
 
-    public BluetoothHandler(Context context){
-        this.context = context.getApplicationContext();
-        this.connection = new Connection(this.context);
+    // -------------------------------------------------------------------------
+    // Constructor
+    // -------------------------------------------------------------------------
+
+    public BluetoothHandler(Context context) {
+        this.context         = context.getApplicationContext();
+        this.connection      = new Connection(this.context);
         this.saveInputFields = SaveInputFields.getInstance(context);
-    };
-
-    private void showToast(String message) {
-        new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(context, message, Toast.LENGTH_SHORT).show());
     }
 
-    public void setDevice(BluetoothDevice device){
+    // -------------------------------------------------------------------------
+    // Configuration
+    // -------------------------------------------------------------------------
+
+    public void setDevice(BluetoothDevice device) {
         this.device = device;
     }
-    public void setupConnection(){
-        if(device == null) return;
-        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-        if(adapter == null){
-            showToast("Bluetooth not supported");
-            return;
-        }
-        if (!adapter.isEnabled()) {
-            showToast("Please enable Bluetooth first");
-            return;
-        }
-        // Android 12+ permission check
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
-                        != PackageManager.PERMISSION_GRANTED) {
-            showToast("BLUETOOTH_CONNECT permission required");
-            return;
-        }
-        // Immediately connect to the supplied device
+
+    // -------------------------------------------------------------------------
+    // Tunnel interface
+    // -------------------------------------------------------------------------
+
+    @Override
+    public void init() {
+        if (!checkPreconditions()) return;
+
         connectToDevice(device);
-
-        webSocketHandler = new WebSocketHandler(context,new WebSocketHandler.MessageCallback() {
-            @Override
-            public void onOpen() {
-                Log.d(TAG, "Connected to WS");
-            }
-
-            @Override
-            public void onPayloadReceivedText(String payload) {
-            }
-            @Override
-            public void onPayloadReceivedByte(byte[] mavlinkBytes) {
-                SendReceive.getInstance().send(mavlinkBytes);
-            }
-            @Override
-            public void onClosed() {
-                Log.d(TAG, "WS connection closed: " );
-            }
-
-            @Override
-            public void onError(String error) {
-                Log.e(TAG, "Error : " + error);
-            }
-        });
-
-        SharedPreferences prefs = saveInputFields.get_shared_pref();
-        webSocketHandler.setupConnection(UART_TUNNEL,prefs.getString(KEY_Session_KEY,"block"));
+        setupWebSocket();
         isRunning = true;
     }
-    private void connectToDevice(BluetoothDevice device){
-        BluetoothListener.onConnectionListener connectionListener =
-                new BluetoothListener.onConnectionListener() {
-                    @Override
-                    public void onConnectionStateChanged(android.bluetooth.BluetoothSocket socket, int state) {
-                        switch (state) {
-                            case Connection.CONNECTING:
-                                Log.d(TAG, "Connecting…");
-                                showToast("Connecting…");
-                                break;
-                            case Connection.CONNECTED:
-                                Log.d(TAG, "Connected successfully");
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                    if (ActivityCompat.checkSelfPermission(
-                                            context,
-                                            Manifest.permission.BLUETOOTH_CONNECT
-                                    ) != PackageManager.PERMISSION_GRANTED) {
-                                        return;
-                                    }
-                                }
 
-                                showToast("Connected to " + device.getName());
-                                setupBluetoothListener();
-                                break;
-                            case Connection.DISCONNECTED:
-                                Log.d(TAG, "Disconnected");
-                                stopAllServices();
-                                break;
-
-                        }
-                    }
-
-                    @Override
-                    public void onConnectionFailed(int errorCode) {
-                        Log.d(TAG, "Connection failed, code " + errorCode);
-                        showToast("Connection failed");
-                        Intent intent = new Intent(ACTION_BT_FAILED);
-                        context.sendBroadcast(intent);
-                        connection.disconnect();
-                        stopAllServices();
-                    }
-                };
-
-        connection.connect(device, true, connectionListener, null);
-    }
-    private void setupBluetoothListener() {
-        // Create the listener object
-        BluetoothListener.onReceiveListener myListener = new BluetoothListener.onReceiveListener() {
-            @Override
-            public void onReceived(String data) {
-            }
-            @Override
-            public void onReceived(String data, byte[] mavlinkBytes) {
-                webSocketHandler.connSendPayloadBytes(mavlinkBytes);
-            }
-        };
-        //set listener
-        SendReceive.getInstance().setOnReceiveListener(myListener);
-
-    }
-    public boolean isRunning(){
-        return isRunning;
-    }
-    public void stopAllServices() {
+    @Override
+    public void close() {
         device = null;
-        stopByUser();
-    }
-
-    private void stopByUser() {
         isRunning = false;
         SendReceive.getInstance().setOnReceiveListener(null);
+
         if (connection.isConnected()) {
             connection.disconnect();
         }
+
         if (webSocketHandler != null) {
             webSocketHandler.closeConnection();
             webSocketHandler = null;
         }
     }
 
+    @Override
+    public boolean isTunnelRunning() {
+        return isRunning;
+    }
+
+    @Override
+    public String getTunnelName() {
+        return device != null ? device.getName() : "null";
+    }
+
+    // -------------------------------------------------------------------------
+    // Private helpers — init steps
+    // -------------------------------------------------------------------------
+
+    /** Validates device, adapter state, and runtime permissions before connecting. */
+    private boolean checkPreconditions() {
+        if (device == null) {
+            Log.w(TAG, "No device set");
+            return false;
+        }
+
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if (adapter == null) {
+            showToast("Bluetooth not supported");
+            return false;
+        }
+
+        if (!adapter.isEnabled()) {
+            showToast("Please enable Bluetooth first");
+            return false;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
+                        != PackageManager.PERMISSION_GRANTED) {
+            showToast("BLUETOOTH_CONNECT permission required");
+            return false;
+        }
+
+        return true;
+    }
+
+    private void connectToDevice(BluetoothDevice device) {
+        connection.connect(device, true, new BluetoothListener.onConnectionListener() {
+            @Override
+            public void onConnectionStateChanged(BluetoothSocket socket, int state) {
+                switch (state) {
+                    case Connection.CONNECTING:
+                        Log.d(TAG, "Connecting…");
+                        showToast("Connecting…");
+                        break;
+
+                    case Connection.CONNECTED:
+                        Log.d(TAG, "Connected successfully");
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                                ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
+                                        != PackageManager.PERMISSION_GRANTED) {
+                            return;
+                        }
+                        showToast("Connected to " + device.getName());
+                        setupBluetoothListener();
+                        break;
+
+                    case Connection.DISCONNECTED:
+                        Log.d(TAG, "Disconnected");
+                        close();
+                        break;
+                }
+            }
+
+            @Override
+            public void onConnectionFailed(int errorCode) {
+                Log.d(TAG, "Connection failed, code " + errorCode);
+                showToast("Connection failed");
+                context.sendBroadcast(new Intent(ACTION_BT_FAILED));
+                connection.disconnect();
+                close();
+            }
+        }, null);
+    }
+
+    private void setupBluetoothListener() {
+        SendReceive.getInstance().setOnReceiveListener(new BluetoothListener.onReceiveListener() {
+            @Override
+            public void onReceived(String data) {}
+
+            @Override
+            public void onReceived(String data, byte[] byteData) {
+                webSocketHandler.connSendPayloadBytes(byteData);
+            }
+        });
+    }
+
+    private void setupWebSocket() {
+        SharedPreferences prefs = saveInputFields.get_shared_pref();
+
+        webSocketHandler = new WebSocketHandler(context, new WebSocketHandler.MessageCallback() {
+            @Override
+            public void onOpen() {
+                Log.d(TAG, "Connected to WS");
+            }
+
+            @Override
+            public void onPayloadReceivedText(String payload) {}
+
+            @Override
+            public void onPayloadReceivedByte(byte[] mavlinkBytes) {
+                SendReceive.getInstance().send(mavlinkBytes);
+            }
+
+            @Override
+            public void onClosed() {
+                Log.d(TAG, "WS connection closed");
+            }
+
+            @Override
+            public void onError(String error) {
+                Log.e(TAG, "WS error: " + error);
+            }
+        });
+
+        webSocketHandler.setupConnection(KEY_data_api_path, prefs.getString(KEY_Session_KEY, "block"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Utility
+    // -------------------------------------------------------------------------
+
+    private void showToast(String message) {
+        new Handler(Looper.getMainLooper()).post(() ->
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show());
+    }
 }

@@ -1,14 +1,11 @@
 package com.github.nikipo.ussoi.service;
 
+import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Device_Id;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_RoomID;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_RoomPWD;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Session_KEY;
-import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_api_path;
-import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_mse_high_fps_Enable;
+import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_control_api_path;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_url;
-import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_local_recording;
-import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_mse_Enable;
-import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_webrtc_Enable;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.USSOI_version;
 
 import android.app.Notification;
@@ -81,12 +78,6 @@ public class ServiceManager extends Service implements LifecycleOwner {
 
         // Reset status flags in preferences
         prefs = saveInputFields.get_shared_pref();
-        prefs.edit()
-                .putBoolean(KEY_mse_Enable, false)
-                .putBoolean(KEY_webrtc_Enable, false)
-                .putBoolean(KEY_mse_high_fps_Enable, false)
-                .putBoolean(KEY_local_recording, false)
-                .apply();
 
         // Login
         AuthLogin authLogin = new AuthLogin();
@@ -96,9 +87,10 @@ public class ServiceManager extends Service implements LifecycleOwner {
 
         authLogin.login(logger, roomId, roomPwd, apiUrl, new AuthLogin.LoginCallback() {
             @Override
-            public void onSuccess(String sessionKey) {
+            public void onSuccess(String sessionKey,String deviceId) {
                 logger.log(TAG + ": Login Successful");
                 prefs.edit().putString(KEY_Session_KEY, sessionKey).apply();
+                prefs.edit().putString(KEY_Device_Id, deviceId).apply();
                 new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
                         android.widget.Toast.makeText(
                                 ServiceManager.this,
@@ -127,7 +119,7 @@ public class ServiceManager extends Service implements LifecycleOwner {
     }
 
     private void initiateConnection() {
-        connectionManager = ConnectionManager.getInstance(this, KEY_api_path);
+        connectionManager = ConnectionManager.getInstance(this, KEY_control_api_path);
         connectionManager.connect();
         logger.log(TAG + ": ConnManager connected and Scheduler initialized");
 

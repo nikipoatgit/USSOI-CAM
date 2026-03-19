@@ -1,7 +1,7 @@
 package com.github.nikipo.ussoi.webrtc;
 
-import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_turn_array;
-import static com.github.nikipo.ussoi.service.control.ConnRouter.sendAck;
+import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_turn_list;
+import static com.github.nikipo.ussoi.service.control.MessageRouter.ConnRouter1.sendAck;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -116,7 +116,7 @@ public class WebRtcHandler {
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.stunprotocol.org:3478").createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.nextcloud.com:3478").createIceServer());
 
-        String turn_Array = prefs.getString(KEY_turn_array,"");
+        String turn_Array = prefs.getString(KEY_turn_list,"");
         try {
             JSONArray turnArray = new JSONArray(turn_Array);
 
