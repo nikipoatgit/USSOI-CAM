@@ -72,7 +72,7 @@ public class ConnectionManager {
             public void onPayloadReceivedText(String payload) {
                 try {
                     JSONObject json = new JSONObject(payload);
-                    ConnRouter1.route(json);
+//                    ConnRouter1.route(json);
                     logger.log(TAG+" INCOMING :"+ json);
                 } catch (Exception e) {
                     logger.log(TAG + ": Bad JSON");

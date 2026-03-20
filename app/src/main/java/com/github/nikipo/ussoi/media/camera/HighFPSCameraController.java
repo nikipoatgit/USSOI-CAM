@@ -1,4 +1,4 @@
-package com.github.nikipo.ussoi.media.highFpsH264;
+package com.github.nikipo.ussoi.media.camera;
 
 import android.Manifest;
 import android.content.Context;
@@ -77,10 +77,7 @@ public final class HighFPSCameraController {
         context = ctx.getApplicationContext();
     }
 
-    // -------------------------------------------------------------------------
     // Surface attachment
-    // -------------------------------------------------------------------------
-
     public synchronized void attachHQSurface(Surface surface) {
         this.hqSurface = surface;
     }
@@ -89,10 +86,7 @@ public final class HighFPSCameraController {
         this.lqSurface = surface;
     }
 
-    // -------------------------------------------------------------------------
     // Static capability query (used by HighSpeedCameraHelper)
-    // -------------------------------------------------------------------------
-
     /**
      * Returns high-speed capabilities for the given camera, or {@code null} on error.
      */
@@ -132,10 +126,7 @@ public final class HighFPSCameraController {
         }
     }
 
-    // -------------------------------------------------------------------------
     // Start
-    // -------------------------------------------------------------------------
-
     /**
      * Opens the camera and creates a constrained high-speed session.
      * Both surfaces must be attached before calling this.
@@ -165,10 +156,7 @@ public final class HighFPSCameraController {
         }
     }
 
-    // -------------------------------------------------------------------------
     // Stop
-    // -------------------------------------------------------------------------
-
     public synchronized void stop() {
         isStreaming = false;
 
@@ -184,10 +172,7 @@ public final class HighFPSCameraController {
         hqLqRequestList   = null;
     }
 
-    // -------------------------------------------------------------------------
     // Streaming pause / resume
-    // -------------------------------------------------------------------------
-
     /**
      * Switches to HQ-only burst — LQ encoder stops receiving frames.
      * Recording continues unaffected.
@@ -219,10 +204,7 @@ public final class HighFPSCameraController {
         }
     }
 
-    // -------------------------------------------------------------------------
     // Camera callbacks
-    // -------------------------------------------------------------------------
-
     private final CameraDevice.StateCallback cameraCallback = new CameraDevice.StateCallback() {
         @Override
         public void onOpened(@NonNull CameraDevice camera) {
@@ -251,10 +233,7 @@ public final class HighFPSCameraController {
         }
     };
 
-    // -------------------------------------------------------------------------
     // Session creation
-    // -------------------------------------------------------------------------
-
     private void createHighSpeedSession() {
         try {
             List<Surface> surfaces = Arrays.asList(hqSurface, lqSurface);
@@ -321,10 +300,7 @@ public final class HighFPSCameraController {
         builder.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON);
     }
 
-    // -------------------------------------------------------------------------
     // Private helpers
-    // -------------------------------------------------------------------------
-
     /**
      * Selects the best high-speed FPS range for the given size and target.
      *

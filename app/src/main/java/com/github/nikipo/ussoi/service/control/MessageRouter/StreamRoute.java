@@ -2,6 +2,11 @@ package com.github.nikipo.ussoi.service.control.MessageRouter;
 
 import android.content.Context;
 
+import com.github.nikipo.ussoi.media.CameraControl;
+import com.github.nikipo.ussoi.media.HFH264.HighFpsH264Media;
+import com.github.nikipo.ussoi.media.Media;
+import com.github.nikipo.ussoi.media.h264.H264Media;
+import com.github.nikipo.ussoi.media.webrtc.WebRtcMedia;
 import com.github.nikipo.ussoi.service.control.ConnectionManager;
 
 import org.json.JSONObject;
@@ -29,10 +34,34 @@ public class StreamRoute {
     private Router router;
     private Context ctx;
     StreamMode streamMode;
+    private Media media;
     public StreamRoute(ConnectionManager connectionManager, Router router, Context ctx, StreamMode streamMode) {
+        this.connectionManager = connectionManager;
+        this.router = router;
+        this.ctx = ctx;
+        this.streamMode = streamMode;
+        setStreamMode();
+        media.init(ctx);
+    }
+
+    private void setStreamMode() {
+        switch (streamMode){
+            case H264:
+                media = new H264Media();
+                break;
+            case HFH264:
+                media = new HighFpsH264Media();
+                break;
+            case WebRtc:
+                media = new WebRtcMedia(connectionManager);
+                break;
+            case None:
+                break;
+        }
     }
 
     public void stopStream() {
+        media.stop();
     }
 
     public void route(ConnectionManager connectionManager, JSONObject json) {

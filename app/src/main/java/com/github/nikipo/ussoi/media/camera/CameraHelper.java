@@ -1,4 +1,4 @@
-package com.github.nikipo.ussoi.media.h264;
+package com.github.nikipo.ussoi.media.camera;
 
 import android.content.Context;
 import android.graphics.SurfaceTexture;
@@ -9,6 +9,9 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 import android.util.Log;
 import android.util.Range;
 import android.util.Size;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.Arrays;
 import java.util.Comparator;
@@ -343,5 +346,75 @@ public class CameraHelper {
         }
 
         return score;
+    }
+
+    public JSONObject SupportedResolutions(String cameraId) {
+        try {
+            Size[] sizes = getOutputSizes(cameraId);
+            if (sizes == null) return new JSONObject();
+
+            CameraCharacteristics chars = getCameraCharacteristics(cameraId);
+            StreamConfigurationMap map  = chars.get(
+                    CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+
+            return buildResolutionJson(cameraId, sizes, false, map, chars);
+
+        } catch (Exception e) {
+            Log.e(TAG, "SupportedResolutions failed", e);
+            return new JSONObject();
+        }
+    }
+
+    public static JSONObject buildResolutionJson(
+            String cameraId,
+            Size[] sizes,
+            boolean highSpeed,
+            StreamConfigurationMap map,
+            CameraCharacteristics characteristics
+    ) throws Exception {
+
+        JSONObject root = new JSONObject();
+        root.put("cameraId", cameraId);
+        root.put("type", highSpeed ? "high_speed" : "normal");
+
+        JSONArray resArray = new JSONArray();
+
+
+        for (Size s : sizes) {
+            JSONObject resObj = new JSONObject();
+            resObj.put("width", s.getWidth());
+            resObj.put("height", s.getHeight());
+
+            JSONArray fpsArray = new JSONArray();
+
+            if (highSpeed) {
+                Range<Integer>[] ranges = map.getHighSpeedVideoFpsRangesFor(s);
+                if (ranges != null) {
+                    for (Range<Integer> r : ranges) {
+                        JSONObject fps = new JSONObject();
+                        fps.put("min", r.getLower());
+                        fps.put("max", r.getUpper());
+                        fpsArray.put(fps);
+                    }
+                }
+            } else {
+                Range<Integer>[] ranges = characteristics .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+
+                if (ranges != null) {
+                    for (Range<Integer> r : ranges) {
+                        JSONObject fps = new JSONObject();
+                        fps.put("min", r.getLower());
+                        fps.put("max", r.getUpper());
+                        fpsArray.put(fps);
+                    }
+                }
+            }
+
+            resObj.put("fpsRanges", fpsArray);
+            resArray.put(resObj);
+        }
+
+        root.put("resolutions", resArray);
+        return root;
     }
 }

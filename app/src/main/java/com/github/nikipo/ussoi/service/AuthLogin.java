@@ -1,4 +1,4 @@
-package com.github.nikipo.ussoi.service.control;
+package com.github.nikipo.ussoi.service;
 
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_auth_api_path;
 
@@ -8,7 +8,6 @@ import androidx.annotation.NonNull;
 
 import com.github.nikipo.ussoi.storage.logs.Logging;
 
-import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;

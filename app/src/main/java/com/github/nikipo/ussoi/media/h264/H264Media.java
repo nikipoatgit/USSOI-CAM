@@ -11,14 +11,19 @@ import android.util.Size;
 import android.view.Surface;
 
 import com.github.nikipo.ussoi.media.CameraControl;
+import com.github.nikipo.ussoi.media.camera.CameraHelper;
 import com.github.nikipo.ussoi.media.Media;
+import com.github.nikipo.ussoi.media.camera.CameraController;
 import com.github.nikipo.ussoi.media.enocders.LocalRecorder;
 import com.github.nikipo.ussoi.media.enocders.StreamingEncoder;
 import com.github.nikipo.ussoi.network.WebSocketHandler;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 
+import org.json.JSONObject;
+
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 /**
  * *****************************************************************************
@@ -43,6 +48,8 @@ public class H264Media implements Media, CameraControl {
     private CameraHelper cameraHelper;
     private Logging logger;
     private Context context;
+    private volatile long  basePtsUs    = -1;
+    private static final int    HEADER_SIZE = 1 + 8; // keyFrame flag + 8-byte PTS
 
     // Stream config (LQ)
     private int streamWidth = 1920;
@@ -206,9 +213,7 @@ public class H264Media implements Media, CameraControl {
             while (drainRunning) {
                 StreamingEncoder.EncodedFrame frame = streamingEncoder.dequeue();
                 if (frame != null && webSocketHandler != null) {
-                    byte[] bytes = new byte[frame.data.remaining()];
-                    frame.data.get(bytes);
-                    webSocketHandler.connSendPayloadBytes(bytes);
+                    webSocketHandler.connSendPayloadBytes(buildPacket(frame));
                 }
             }
         }, "StreamDrainThread");
@@ -216,6 +221,21 @@ public class H264Media implements Media, CameraControl {
         drainThread.start();
 
         return 0;
+    }
+    private byte[] buildPacket(StreamingEncoder.EncodedFrame frame) {
+        if (basePtsUs < 0) basePtsUs = frame.ptsUs;
+
+        long pts       = frame.ptsUs - basePtsUs;
+        ByteBuffer src = frame.data.duplicate();
+        byte[] data    = new byte[HEADER_SIZE + src.remaining()];
+        int i          = 0;
+
+        data[i++] = (byte) (frame.keyFrame ? 1 : 0);
+        for (int b = 7; b >= 0; b--) {
+            data[i++] = (byte) (pts >> (b * 8));
+        }
+        src.get(data, i, src.remaining());
+        return data;
     }
 
 
@@ -410,6 +430,11 @@ public class H264Media implements Media, CameraControl {
     public short FlipCamera() {
         // this is implemented on host side
         return 0;
+    }
+
+    @Override
+    public JSONObject SupportedResolutions() {
+        return cameraHelper.SupportedResolutions(currentCameraId);
     }
 
     private void stopDrainThread() {

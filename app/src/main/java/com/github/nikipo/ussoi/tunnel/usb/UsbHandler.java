@@ -1,4 +1,4 @@
-package com.github.nikipo.ussoi.tunnel;
+package com.github.nikipo.ussoi.tunnel.usb;
 
 
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Session_KEY;
@@ -17,11 +17,10 @@ import android.widget.Toast;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 import com.github.nikipo.ussoi.network.WebSocketHandler;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
+import com.github.nikipo.ussoi.tunnel.Tunnel;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 
-
-import org.json.JSONArray;
 
 import java.io.IOException;
 import java.util.Arrays;

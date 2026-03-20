@@ -1,4 +1,4 @@
-package com.github.nikipo.ussoi.media.h264;
+package com.github.nikipo.ussoi.media.camera;
 
 import android.Manifest;
 import android.content.Context;

@@ -10,9 +10,9 @@ import android.util.Log;
 
 import com.github.nikipo.ussoi.service.control.ConnectionManager;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
-import com.github.nikipo.ussoi.tunnel.BluetoothHandler;
+import com.github.nikipo.ussoi.tunnel.bt.BluetoothHandler;
 import com.github.nikipo.ussoi.tunnel.Tunnel;
-import com.github.nikipo.ussoi.tunnel.UsbHandler;
+import com.github.nikipo.ussoi.tunnel.usb.UsbHandler;
 
 import org.json.JSONArray;
 import org.json.JSONObject;

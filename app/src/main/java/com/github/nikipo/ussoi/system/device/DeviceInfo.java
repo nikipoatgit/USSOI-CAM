@@ -1,4 +1,4 @@
-package com.github.nikipo.ussoi.system;
+package com.github.nikipo.ussoi.system.device;
 
 import android.Manifest;
 import android.app.ActivityManager;

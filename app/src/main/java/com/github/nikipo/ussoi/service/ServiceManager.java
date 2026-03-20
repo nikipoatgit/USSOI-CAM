@@ -25,8 +25,8 @@ import androidx.media3.common.util.UnstableApi;
 
 import com.github.nikipo.ussoi.storage.logs.Logging;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
-import com.github.nikipo.ussoi.service.control.AuthLogin;
 import com.github.nikipo.ussoi.service.control.ConnectionManager;
+import com.github.nikipo.ussoi.system.notification.ServiceNotificationHelper;
 
 import org.jetbrains.annotations.Nullable;
 

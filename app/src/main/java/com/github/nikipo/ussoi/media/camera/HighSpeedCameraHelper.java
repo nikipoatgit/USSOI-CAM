@@ -1,4 +1,6 @@
-package com.github.nikipo.ussoi.media.highFpsH264;
+package com.github.nikipo.ussoi.media.camera;
+
+import static com.github.nikipo.ussoi.media.camera.CameraHelper.buildResolutionJson;
 
 import android.content.Context;
 import android.hardware.camera2.CameraAccessException;
@@ -8,6 +10,8 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 import android.util.Log;
 import android.util.Range;
 import android.util.Size;
+
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -48,26 +52,15 @@ public class HighSpeedCameraHelper {
 
     private final Context context;
 
-    // -------------------------------------------------------------------------
     // Caches
-    // -------------------------------------------------------------------------
-
     private String[]                                   cachedCameraIdList    = null;
     private final Map<String, CameraCharacteristics>   characteristicsCache  = new HashMap<>();
     private final Map<String, Size[]>                  highSpeedSizesCache   = new HashMap<>();
-
-    // -------------------------------------------------------------------------
-    // Constructor
-    // -------------------------------------------------------------------------
 
     public HighSpeedCameraHelper(Context context) {
         if (context == null) throw new IllegalArgumentException("context must not be null");
         this.context = context.getApplicationContext();
     }
-
-    // -------------------------------------------------------------------------
-    // Public API
-    // -------------------------------------------------------------------------
 
     /**
      * Returns the next camera ID that supports high-speed video, cycling through
@@ -274,10 +267,6 @@ public class HighSpeedCameraHelper {
         return highSpeedSizesCache.get(cameraId);
     }
 
-    // -------------------------------------------------------------------------
-    // Private helpers — scoring
-    // -------------------------------------------------------------------------
-
     private boolean supportsFps(StreamConfigurationMap map, Size size, int targetFps) {
         try {
             Range<Integer>[] ranges = map.getHighSpeedVideoFpsRangesFor(size);
@@ -287,5 +276,22 @@ public class HighSpeedCameraHelper {
             }
         } catch (Exception ignored) {}
         return false;
+    }
+
+    public JSONObject SupportedResolutions(String cameraId) {
+        try {
+            Size[] sizes = getHighSpeedSizes(cameraId);
+            if (sizes == null) return new JSONObject();
+
+            CameraCharacteristics chars = getCameraCharacteristics(cameraId);
+            StreamConfigurationMap map  = chars.get(
+                    CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+
+            return buildResolutionJson(cameraId, sizes, true, map, chars);
+
+        } catch (Exception e) {
+            Log.e(TAG, "SupportedResolutions failed", e);
+            return new JSONObject();
+        }
     }
 }

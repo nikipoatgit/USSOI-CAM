@@ -1,4 +1,4 @@
-package com.github.nikipo.ussoi.media.highFpsH264;
+package com.github.nikipo.ussoi.media.HFH264;
 
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Session_KEY;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_stream_api_path;
@@ -11,12 +11,16 @@ import android.util.Size;
 import android.view.Surface;
 
 import com.github.nikipo.ussoi.media.CameraControl;
+import com.github.nikipo.ussoi.media.camera.HighSpeedCameraHelper;
 import com.github.nikipo.ussoi.media.Media;
+import com.github.nikipo.ussoi.media.camera.HighFPSCameraController;
 import com.github.nikipo.ussoi.media.enocders.LocalRecorder;
 import com.github.nikipo.ussoi.media.enocders.StreamingEncoder;
 import com.github.nikipo.ussoi.network.WebSocketHandler;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.storage.logs.Logging;
+
+import org.json.JSONObject;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -26,7 +30,7 @@ import java.nio.ByteBuffer;
  *
  * @author nikhi
  * *****************************************************************************
- * @file HighFpsH246Media
+ * @file HighFpsH264Media
  * @attention Copyright (c) 2026
  * All rights reserved.
  * <p>
@@ -38,25 +42,17 @@ import java.nio.ByteBuffer;
  * *****************************************************************************
  */
 
-public class HighFpsH246Media implements Media, CameraControl {
+public class HighFpsH264Media implements Media, CameraControl {
 
     private static final String TAG         = "HighFpsH246Media";
     private static final int    HEADER_SIZE = 1 + 8; // keyFrame flag + 8-byte PTS
-
-    // -------------------------------------------------------------------------
-    // Dependencies
-    // -------------------------------------------------------------------------
-
     private Context               context;
     private Logging               logger;
     private SharedPreferences     preferences;
     private WebSocketHandler      webSocketHandler;
-    private HighSpeedCameraHelper cameraHelper;
+    private HighSpeedCameraHelper highSpeedCameraHelper;
 
-    // -------------------------------------------------------------------------
     // Config — HQ and LQ share the same size (high-speed API requirement)
-    // -------------------------------------------------------------------------
-
     private int videoWidth       = 1280;
     private int videoHeight      = 720;
     private int videoFps         = 60;
@@ -66,51 +62,38 @@ public class HighFpsH246Media implements Media, CameraControl {
     private Size           currentSize;
     private Range<Integer> currentFpsRange;
 
-    // -------------------------------------------------------------------------
     // Camera
-    // -------------------------------------------------------------------------
-
     private String                  currentCameraId = null;
     private HighFPSCameraController cameraController;
 
-    // -------------------------------------------------------------------------
     // Encoders + surfaces
-    // -------------------------------------------------------------------------
-
     private LocalRecorder    localRecorder;
     private StreamingEncoder streamingEncoder;
     private Surface          hqSurface;
     private Surface          lqSurface;
 
-    // -------------------------------------------------------------------------
     // Drain thread
-    // -------------------------------------------------------------------------
-
     private Thread           drainThread;
     private volatile boolean drainRunning = false;
     private long             basePtsUs    = -1;
 
-    // =========================================================================
     // Media — lifecycle
-    // =========================================================================
-
     @Override
     public void init(Context ctx) {
         context      = ctx.getApplicationContext();
         logger       = Logging.getInstance(context);
         preferences  = SaveInputFields.getInstance(context).get_shared_pref();
-        cameraHelper = new HighSpeedCameraHelper(context);
+        highSpeedCameraHelper = new HighSpeedCameraHelper(context);
 
         // Select a high-speed capable camera
-        currentCameraId = cameraHelper.cycleCameraId(currentCameraId);
+        currentCameraId = highSpeedCameraHelper.cycleCameraId(currentCameraId);
         if (currentCameraId == null) {
             logger.log(TAG + ": no high-speed camera available");
             return;
         }
 
         // Resolve hardware size (HQ == LQ, constrained by the high-speed API)
-        currentSize = cameraHelper.getBestHighSpeedSize(
-                currentCameraId, videoWidth, videoHeight, videoFps);
+        currentSize = highSpeedCameraHelper.getBestHighSpeedSize(currentCameraId, videoWidth, videoHeight, videoFps);
         if (currentSize == null) {
             logger.log(TAG + ": no suitable high-speed size found");
             return;
@@ -118,11 +101,9 @@ public class HighFpsH246Media implements Media, CameraControl {
         videoWidth  = currentSize.getWidth();
         videoHeight = currentSize.getHeight();
 
-        currentFpsRange = cameraHelper.getBestHighSpeedFpsRange(
-                currentCameraId, currentSize, videoFps);
+        currentFpsRange = highSpeedCameraHelper.getBestHighSpeedFpsRange(currentCameraId, currentSize, videoFps);
 
-        Log.d(TAG, "High-speed config: " + videoWidth + "x" + videoHeight
-                + " @ " + currentFpsRange + " FPS");
+        Log.d(TAG, "High-speed config: " + videoWidth + "x" + videoHeight+ " @ " + currentFpsRange + " FPS");
 
         // WebSocket
         webSocketHandler = new WebSocketHandler(context, new WebSocketHandler.MessageCallback() {
@@ -184,10 +165,7 @@ public class HighFpsH246Media implements Media, CameraControl {
         basePtsUs = -1;
     }
 
-    // =========================================================================
     // Media — streaming
-    // =========================================================================
-
     @Override
     public short StartStream() {
         if (streamingEncoder == null) return -1;
@@ -231,8 +209,7 @@ public class HighFpsH246Media implements Media, CameraControl {
         streamingEncoder.release();
         streamingEncoder = null;
 
-        Size resolved = cameraHelper.getBestHighSpeedSize(
-                currentCameraId, videoWidth, videoHeight, videoFps);
+        Size resolved = highSpeedCameraHelper.getBestHighSpeedSize(currentCameraId, videoWidth, videoHeight, videoFps);
         if (resolved == null) {
             logger.log(TAG + ": SetStreamResolution — no suitable high-speed size");
             return -2;
@@ -241,8 +218,7 @@ public class HighFpsH246Media implements Media, CameraControl {
         videoWidth  = resolved.getWidth();
         videoHeight = resolved.getHeight();
 
-        currentFpsRange = cameraHelper.getBestHighSpeedFpsRange(
-                currentCameraId, currentSize, videoFps);
+        currentFpsRange = highSpeedCameraHelper.getBestHighSpeedFpsRange(currentCameraId, currentSize, videoFps);
 
         try {
             streamingEncoder = new StreamingEncoder();
@@ -291,10 +267,7 @@ public class HighFpsH246Media implements Media, CameraControl {
         }
     }
 
-    // =========================================================================
     // Media — recording
-    // =========================================================================
-
     @Override
     public short StartRecording() {
         if (localRecorder == null)             return -1;
@@ -310,51 +283,8 @@ public class HighFpsH246Media implements Media, CameraControl {
      */
     @Override
     public short SetRecordingResolution(int width, int height, int fps) {
-        if (localRecorder != null && localRecorder.isRecordingActive()) {
-            logger.log(TAG + ": SetRecordingResolution — stop recording first");
-            return -1;
-        }
-
-        videoWidth  = width;
-        videoHeight = height;
-        videoFps    = fps;
-
-        if (localRecorder == null) return 0; // values stored for next init
-
-        localRecorder.release();
-        localRecorder = null;
-
-        Size resolved = cameraHelper.getBestHighSpeedSize(
-                currentCameraId, videoWidth, videoHeight, videoFps);
-        if (resolved == null) {
-            logger.log(TAG + ": SetRecordingResolution — no suitable high-speed size");
-            return -2;
-        }
-        currentSize = resolved;
-        videoWidth  = resolved.getWidth();
-        videoHeight = resolved.getHeight();
-
-        currentFpsRange = cameraHelper.getBestHighSpeedFpsRange(
-                currentCameraId, currentSize, videoFps);
-
-        try {
-            localRecorder = new LocalRecorder(context);
-            hqSurface     = localRecorder.prepare(
-                    videoWidth, videoHeight,
-                    currentFpsRange.getUpper(),
-                    recordBitrateBps);
-        } catch (IOException e) {
-            logger.log(TAG + ": SetRecordingResolution re-prepare failed: " + Log.getStackTraceString(e));
-            return -3;
-        }
-
-        cameraController.stop();
-        cameraController = new HighFPSCameraController(context);
-        cameraController.attachHQSurface(hqSurface);
-        cameraController.attachLQSurface(lqSurface);
-        cameraController.start(currentCameraId, currentSize, currentFpsRange.getUpper());
-
-        return 0;
+        logger.log(TAG + ": SetRecordingResolution — Recording Resolution same as Streaming");
+        return -1;
     }
 
     @Override
@@ -379,24 +309,21 @@ public class HighFpsH246Media implements Media, CameraControl {
         }
     }
 
-    // =========================================================================
     // Media — camera
-    // =========================================================================
-
     @Override
     public short SwitchCamera() {
         if (localRecorder != null && localRecorder.isRecordingActive()) {
             logger.log(TAG + ": SwitchCamera — stop recording first");
             return -1;
         }
-        if (cameraHelper == null) return -2;
+        if (highSpeedCameraHelper == null) return -2;
 
         boolean wasStreaming = drainRunning;
         if (wasStreaming) { stopDrainThread(); streamingEncoder.stop(); }
         if (cameraController != null) cameraController.stop();
 
-        cameraHelper.invalidateCameraCache();
-        currentCameraId = cameraHelper.cycleCameraId(currentCameraId);
+        highSpeedCameraHelper.invalidateCameraCache();
+        currentCameraId = highSpeedCameraHelper.cycleCameraId(currentCameraId);
 
         return SetStreamResolution(videoWidth, videoHeight, videoFps);
     }
@@ -411,6 +338,12 @@ public class HighFpsH246Media implements Media, CameraControl {
     public short FlipCamera() {
         // Implemented on host side
         return 0;
+    }
+
+    @Override
+    public JSONObject SupportedResolutions() {
+
+        return highSpeedCameraHelper.SupportedResolutions(currentCameraId);
     }
 
     // =========================================================================
@@ -446,10 +379,6 @@ public class HighFpsH246Media implements Media, CameraControl {
     @Override public void enableAutoFocus() { /* always on — no-op */ }
 
     @Override public void apply() { /* no pending manual controls — no-op */ }
-
-    // =========================================================================
-    // Private helpers
-    // =========================================================================
 
     private void drainLoop() {
         while (drainRunning) {

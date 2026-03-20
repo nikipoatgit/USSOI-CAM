@@ -6,10 +6,11 @@ import android.content.Context;
 import android.hardware.camera2.CameraManager;
 import android.util.Log;
 
+import com.github.nikipo.ussoi.media.camera.HighFPSCameraController;
 import com.github.nikipo.ussoi.service.control.ConnectionManager;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.storage.logs.Logging;
-import com.github.nikipo.ussoi.system.DeviceInfo;
+import com.github.nikipo.ussoi.system.device.DeviceInfo;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -150,8 +151,12 @@ public class Router {
         stream_type = mode;
 
         // since params are being rest stop stream if active
-        if (streamRoute == null)  streamRoute = new StreamRoute(connectionManager,this,ctx,mode);
-        streamRoute.stopStream();
+        if (streamRoute == null)  {
+            streamRoute.stopStream();
+            streamRoute = null;
+            streamRoute = new StreamRoute(connectionManager,this,ctx,mode);
+        }
+        streamRoute = null;
         is_params_set = true;
     }
 
@@ -166,8 +171,7 @@ public class Router {
 
             for (String cameraId : manager.getCameraIdList()) {
 
-                Object caps =
-                        HighFPSCameraController.getHighSpeedCapabilities(ctx, cameraId);
+                Object caps =HighFPSCameraController.getHighSpeedCapabilities(ctx, cameraId);
 
                 if (caps != null) {
                     Log.d(TAG, "High-FPS camera found: " + cameraId);

@@ -1,4 +1,4 @@
-package com.github.nikipo.ussoi.tunnel;
+package com.github.nikipo.ussoi.tunnel.bt;
 
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Session_KEY;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_data_api_path;
@@ -21,21 +21,15 @@ import androidx.core.app.ActivityCompat;
 
 import com.github.nikipo.ussoi.network.WebSocketHandler;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
+import com.github.nikipo.ussoi.tunnel.Tunnel;
 import com.psp.bluetoothlibrary.BluetoothListener;
 import com.psp.bluetoothlibrary.Connection;
 import com.psp.bluetoothlibrary.SendReceive;
-
-import org.json.JSONArray;
 
 public class BluetoothHandler implements Tunnel {
 
     public static final String ACTION_BT_FAILED = "com.example.ussoi.BT_CONNECTION_FAILED";
     private static final String TAG = "BtHandler";
-
-    // -------------------------------------------------------------------------
-    // Fields
-    // -------------------------------------------------------------------------
-
     private final Context         context;
     private final Connection      connection;
     private final SaveInputFields saveInputFields;
@@ -44,28 +38,18 @@ public class BluetoothHandler implements Tunnel {
     private WebSocketHandler webSocketHandler;
     private boolean          isRunning = false;
 
-    // -------------------------------------------------------------------------
-    // Constructor
-    // -------------------------------------------------------------------------
-
     public BluetoothHandler(Context context) {
         this.context         = context.getApplicationContext();
         this.connection      = new Connection(this.context);
         this.saveInputFields = SaveInputFields.getInstance(context);
     }
 
-    // -------------------------------------------------------------------------
     // Configuration
-    // -------------------------------------------------------------------------
-
     public void setDevice(BluetoothDevice device) {
         this.device = device;
     }
 
-    // -------------------------------------------------------------------------
     // Tunnel interface
-    // -------------------------------------------------------------------------
-
     @Override
     public void init() {
         if (!checkPreconditions()) return;
@@ -77,7 +61,6 @@ public class BluetoothHandler implements Tunnel {
 
     @Override
     public void close() {
-        device = null;
         isRunning = false;
         SendReceive.getInstance().setOnReceiveListener(null);
 
@@ -101,10 +84,7 @@ public class BluetoothHandler implements Tunnel {
         return device != null ? device.getName() : "null";
     }
 
-    // -------------------------------------------------------------------------
     // Private helpers — init steps
-    // -------------------------------------------------------------------------
-
     /** Validates device, adapter state, and runtime permissions before connecting. */
     private boolean checkPreconditions() {
         if (device == null) {
@@ -123,9 +103,7 @@ public class BluetoothHandler implements Tunnel {
             return false;
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
-                        != PackageManager.PERMISSION_GRANTED) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             showToast("BLUETOOTH_CONNECT permission required");
             return false;
         }
@@ -197,8 +175,8 @@ public class BluetoothHandler implements Tunnel {
             public void onPayloadReceivedText(String payload) {}
 
             @Override
-            public void onPayloadReceivedByte(byte[] mavlinkBytes) {
-                SendReceive.getInstance().send(mavlinkBytes);
+            public void onPayloadReceivedByte(byte[] byteData) {
+                SendReceive.getInstance().send(byteData);
             }
 
             @Override
@@ -215,10 +193,7 @@ public class BluetoothHandler implements Tunnel {
         webSocketHandler.setupConnection(KEY_data_api_path, prefs.getString(KEY_Session_KEY, "block"));
     }
 
-    // -------------------------------------------------------------------------
     // Utility
-    // -------------------------------------------------------------------------
-
     private void showToast(String message) {
         new Handler(Looper.getMainLooper()).post(() ->
                 Toast.makeText(context, message, Toast.LENGTH_SHORT).show());

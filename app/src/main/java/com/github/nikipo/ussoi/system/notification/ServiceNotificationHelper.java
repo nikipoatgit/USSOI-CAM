@@ -1,4 +1,4 @@
-package com.github.nikipo.ussoi.service;
+package com.github.nikipo.ussoi.system.notification;
 
 import android.app.Notification;
 import android.app.NotificationChannel;

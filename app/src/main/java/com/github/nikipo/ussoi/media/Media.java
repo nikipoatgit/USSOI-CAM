@@ -2,6 +2,8 @@ package com.github.nikipo.ussoi.media;
 
 import android.content.Context;
 
+import org.json.JSONObject;
+
 /**
  * *****************************************************************************
  *
@@ -40,5 +42,6 @@ public interface Media {
     short SwitchCamera();
     short RotateCamera();
     short FlipCamera();
+    JSONObject SupportedResolutions();
 }
 
