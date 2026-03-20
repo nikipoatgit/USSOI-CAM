@@ -76,7 +76,7 @@ public class Router {
 
             case "media":
                 if (is_params_set && streamRoute != null) {
-                    streamRoute.route(connectionManager, json);
+                    streamRoute.route(json);
                 }
                 else {
                     sendNack(connectionManager,json.optString("cmdId", ""),"Params Not Set");
