@@ -66,6 +66,12 @@ public class StreamRoute {
         media.stop();
     }
 
+    public boolean isStreaming(){
+        return media.IsStreaming();
+    }
+    public boolean isRecording(){
+        return media.IsRecording();
+    }
     public void route(JSONObject json) {
         try {
             String cmd   = json.optString("cmd", "");

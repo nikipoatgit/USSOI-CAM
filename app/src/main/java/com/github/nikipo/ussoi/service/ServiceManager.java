@@ -5,6 +5,7 @@ import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_RoomID;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_RoomPWD;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Session_KEY;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_control_api_path;
+import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_device_name;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_url;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.USSOI_version;
 
@@ -84,8 +85,9 @@ public class ServiceManager extends Service implements LifecycleOwner {
         String roomId = prefs.getString(KEY_RoomID, "blockMe");
         String roomPwd = prefs.getString(KEY_RoomPWD, "blockMe");
         String apiUrl = prefs.getString(KEY_url, "http://10.0.0.1");
+        String deviceName = prefs.getString(KEY_device_name,"Lelouch");
 
-        authLogin.login(logger, roomId, roomPwd, apiUrl, new AuthLogin.LoginCallback() {
+        authLogin.login(logger, deviceName, roomId, roomPwd, apiUrl, new AuthLogin.LoginCallback() {
             @Override
             public void onSuccess(String sessionKey,String deviceId) {
                 logger.log(TAG + ": Login Successful");

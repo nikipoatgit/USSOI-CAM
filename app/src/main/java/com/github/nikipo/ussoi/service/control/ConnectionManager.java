@@ -6,9 +6,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import com.github.nikipo.ussoi.service.control.MessageRouter.Router;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
-import com.github.nikipo.ussoi.network.WebSocketHandler;
+import com.github.nikipo.ussoi.network.Webscoket.WebSocketHandler;
 import com.github.nikipo.ussoi.system.telemetry.SysTelemetry;
 
 import org.json.JSONException;
@@ -25,16 +26,18 @@ public class ConnectionManager {
     private SharedPreferences prefs;
     private SaveInputFields saveInputFields;
     private Logging logger;
+    private Router router;
     static final String KEY_Session_KEY = "sessionKey";
 
     private ConnectionManager(Context ctx, String url) {
         this.context = ctx.getApplicationContext();
         this.wsUrl = url;
 
-        ConnRouter1.init(this, ctx);
         logger = Logging.getInstance(context);
         saveInputFields = SaveInputFields.getInstance(ctx);
         this.prefs = saveInputFields.get_shared_pref();
+
+        router= new Router();
     }
 
     public static ConnectionManager getInstance(Context ctx, String url){
@@ -72,7 +75,7 @@ public class ConnectionManager {
             public void onPayloadReceivedText(String payload) {
                 try {
                     JSONObject json = new JSONObject(payload);
-//                    ConnRouter1.route(json);
+                    router.route(json);
                     logger.log(TAG+" INCOMING :"+ json);
                 } catch (Exception e) {
                     logger.log(TAG + ": Bad JSON");
@@ -106,6 +109,10 @@ public class ConnectionManager {
         }
     }
 
+    private char getStatusTelem() {
+        return router.getStatusTelem();
+    }
+
     public void stopAllServices() {
         if (impClientInfoSender != null) {
             impClientInfoSender.stopSending();
@@ -121,7 +128,7 @@ public class ConnectionManager {
             sysTelemetry.stopMonitoring();
         }
 
-        ConnRouter1.stopAllServices();
+        router.stop();
     }
 
     // issue if
@@ -158,7 +165,7 @@ public class ConnectionManager {
                         // Build combined status object
                         JSONObject obj = new JSONObject();
                         obj.put("type", "telem");
-                        obj.put("hex", telemetry.getPacket()+ ConnRouter1.getClientStat());
+                        obj.put("hex", telemetry.getPacket() + sender.getStatusTelem());
 
                         sender.send(obj);
                         Thread.sleep(3000);
@@ -182,4 +189,5 @@ public class ConnectionManager {
             }
         }
     }
+
 }

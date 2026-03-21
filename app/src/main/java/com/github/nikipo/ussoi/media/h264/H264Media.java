@@ -16,7 +16,7 @@ import com.github.nikipo.ussoi.media.Media;
 import com.github.nikipo.ussoi.media.camera.CameraController;
 import com.github.nikipo.ussoi.media.enocders.LocalRecorder;
 import com.github.nikipo.ussoi.media.enocders.StreamingEncoder;
-import com.github.nikipo.ussoi.network.WebSocketHandler;
+import com.github.nikipo.ussoi.network.Webscoket.WebSocketHandler;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 

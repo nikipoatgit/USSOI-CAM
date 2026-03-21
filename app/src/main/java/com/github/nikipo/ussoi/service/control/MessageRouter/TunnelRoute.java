@@ -144,6 +144,10 @@ public class TunnelRoute {
         }
     }
 
+    public  boolean isTunnelRunning(){
+        // todo implement this
+        return true;
+    }
     private boolean startTunnel(int tunnelId) {
         if (tunnels == null || tunnelId < 0 || tunnelId >= tunnels.size()) {
             return false;
@@ -153,6 +157,7 @@ public class TunnelRoute {
         if (t == null) return false;
 
         try {
+            // todo set repeat guard
             t.init();
             return true;
         } catch (Exception e) {
@@ -176,5 +181,13 @@ public class TunnelRoute {
         }
     }
 
+    public void stopTunnel() {
 
+        for (Tunnel t : tunnels) {
+            try {
+                t.close();
+            } catch (Exception e) {
+            }
+        }
+    }
 }

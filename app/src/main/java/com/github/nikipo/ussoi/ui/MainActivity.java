@@ -1,6 +1,8 @@
 package com.github.nikipo.ussoi.ui;
 
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_BT_SWITCH;
+import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Device_Id;
+import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_device_name;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_url;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_USB_Switch;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.MASK;
@@ -60,7 +62,7 @@ public class MainActivity extends AppCompatActivity {
 
     // UI Components
     private TextView usbInfoText, versionTextField;
-    private EditText urlIp, roomId, roomPwd;
+    private EditText urlIp, roomId, roomPwd,deviceName;
     private Button serviceButton;
     private MaterialButton radioUsb, radioBt;
     private MaterialButtonToggleGroup connectionToggleGroup;
@@ -168,6 +170,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void setViews() {
         usbInfoText = findViewById(R.id.usbInfoText);
+        deviceName = findViewById(R.id.deviceName);
         urlIp = findViewById(R.id.url_ip);
         roomId = findViewById(R.id.roomId);
         roomPwd = findViewById(R.id.roomPwd);
@@ -214,6 +217,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void restoreUiState() {
         urlIp.setText(pref.getString(KEY_url, ""));
+        deviceName.setText(pref.getString(KEY_device_name,"Lelouch"));
         boolean btSelected = pref.getBoolean(KEY_BT_SWITCH, false);
         boolean usbSelected = pref.getBoolean(KEY_USB_Switch, false);
 
@@ -233,7 +237,7 @@ public class MainActivity extends AppCompatActivity {
             String url = urlIp.getText().toString().trim();
             if (!url.endsWith("/")) url += "/";
 
-            pref.edit().putString(KEY_url, url).putBoolean(KEY_BT_SWITCH, radioBt.isChecked()).putBoolean(KEY_USB_Switch, radioUsb.isChecked()).apply();
+            pref.edit().putString(KEY_url, url).putString(KEY_Device_Id,deviceName.getText().toString().trim()).putBoolean(KEY_BT_SWITCH, radioBt.isChecked()).putBoolean(KEY_USB_Switch, radioUsb.isChecked()).apply();
 
             // Handle Password Update securely
             String currentId = roomId.getText().toString().trim();

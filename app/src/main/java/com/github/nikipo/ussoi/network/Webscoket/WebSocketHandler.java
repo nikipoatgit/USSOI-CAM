@@ -1,4 +1,4 @@
-package com.github.nikipo.ussoi.network;
+package com.github.nikipo.ussoi.network.Webscoket;
 
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_url;
 

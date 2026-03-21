@@ -211,4 +211,19 @@ public class Router {
             cm.send(res);
         } catch (Exception ignored) {}
     }
+
+    public void stop() {
+        tunnelRoute.stopTunnel();
+        streamRoute.stopStream();
+    }
+
+    public char getStatusTelem() {
+        int status = 0;
+
+        if (tunnelRoute.isTunnelRunning()) status |= 1;      // bit 0
+        if (streamRoute.isStreaming())     status |= 1 << 1; // bit 1
+        if (streamRoute.isRecording())     status |= 1 << 2; // bit 2
+
+        return "0123456789ABCDEF".charAt(status & 0x0F);
+    }
 }

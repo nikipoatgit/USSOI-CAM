@@ -16,8 +16,10 @@
     <string name="connection_method">Connection Method</string>
     <string name="notpwd">not the Pwd</string>
     <string name="admin_is">admin is</string>
+    <string name="lelouch">Lelouch </string>
     <string name="room_pwd">Room PWD</string>
     <string name="room_id">Room Id</string>
+    <string name="device_name">Device Name</string>
     <string name="keep_screen_on">Keep Screen ON</string>
     <string name="arigato">arigato</string>
     <string name="version">Version</string>
