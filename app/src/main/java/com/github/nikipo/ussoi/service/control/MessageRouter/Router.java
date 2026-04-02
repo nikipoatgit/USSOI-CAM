@@ -1,6 +1,8 @@
 package com.github.nikipo.ussoi.service.control.MessageRouter;
 
+import static com.github.nikipo.ussoi.media.camera.CameraHelper.buildAllCamerasJson;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Device_Id;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.*;
 
 import android.content.Context;
 import android.hardware.camera2.CameraManager;
@@ -13,7 +15,6 @@ import com.github.nikipo.ussoi.storage.logs.Logging;
 import com.github.nikipo.ussoi.system.deviceInfo.DeviceInfoDynamic;
 import com.github.nikipo.ussoi.system.deviceInfo.DeviceInfoStatic;
 
-import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
@@ -44,205 +45,157 @@ public class Router{
 
     // global state variables
     private boolean is_params_set;
-    private boolean high_fps_support;
-    private StreamMode stream_type;
+    private final boolean high_fps_support;
+    private StreamMode streamMode = StreamMode.None;
     private String deviceId;
+    private JSONObject camRes;
 
     public Router(ConnectionManager sender, Context context) {
-        this.ctx = context;
+        ctx = context;
         connectionManager = sender;
         deviceInfoDynamic = new DeviceInfoDynamic(context);
         deviceInfoStatic = new DeviceInfoStatic(context);
+
+        try {
+            camRes = buildAllCamerasJson((CameraManager) context.getSystemService(Context.CAMERA_SERVICE));
+        }
+        catch (Exception e){
+            sendError(connectionManager,CMD_ID,CMD,"Device Failed To build Camera Resolutions");
+            e.printStackTrace();
+            // TODO log
+        }
+
         logger = Logging.getInstance(ctx);
 
-        deviceId = SaveInputFields.getInstance(ctx).get_shared_pref().getString(KEY_Device_Id, "123");
+        deviceId = SaveInputFields.getInstance(ctx).get_shared_pref().getString(KEY_Device_Id, EMPTY);
+
         is_params_set = false;
         high_fps_support = hasHighFpsCamera();
+
         tunnelRoute = new TunnelRoute(sender, this, ctx);
         streamRoute = new StreamRoute(connectionManager, this, ctx, StreamMode.None);
     }
 
-    /**
-     * Main entry point. Routes incoming server commands to the correct handler
-     * based on the "cmd" field. All messages must carry a matching "deviceId".
-     *
-     * Expected incoming format:
-     * {
-     *   "cmd":      "<command_name>",
-     *   "cmdId":    "<uuid>",
-     *   "deviceId": "<device_id>",
-     *   ... optional extra fields per command ...
-     * }
-     */
+
     public void route(JSONObject json) {
         Log.d(TAG,json.toString());
-        String incomingDeviceId = json.optString("deviceId", "");
-        String cmd   = json.optString("cmd", "");
-        String cmdId = json.optString("cmdId", "");
-
-//        // ── Device-ID guard ───────────────────────────────────────────────────
-//        if (!incomingDeviceId.equals(this.deviceId)) {
-//            sendNack(connectionManager, cmdId, cmd, "Invalid deviceId");
-//            return;
-//        }
+        String cmd   = json.optString(CMD, EMPTY);
+        String cmdId = json.optString(CMD_ID, EMPTY);
 
         switch (cmd) {
 
             // ── Param commands ────────────────────────────────────────────────
-            case "get_params":
-                sendParams(json);
+            case GET_PARAMS:
+                sendParams(null);
                 break;
 
-            case "set_params":
+            case SET_PARAMS:
                 setParams(json);
                 break;
 
-            // ── Tunnel commands ───────────────────────────────────────────────
-            case "start_tunnel":
-            case "stop_tunnel":
-            case "get_tunnels":
+            case GET_RES:
+                sendResponse(connectionManager,GET_RES,CMD_ID,camRes);
+                break;
+
+            case GET_TUNNELS:
+                sendResponse(connectionManager,GET_TUNNELS,CMD_ID,tunnelRoute.getTunnels());
+                break;
+
+            case START_TUNNEL:
+            case STOP_TUNNEL:
                 tunnelRoute.route(json);
                 break;
 
-            // ── Device-info commands (server-initiated queries) ────────────────
-            case "stats":
-            case "identity":
-                handleDeviceInfo(json);
+            case STATS:
+                sendResponse(connectionManager, cmd, cmdId, deviceInfoDynamic.buildSerialPacket());
                 break;
 
-            // ── Stop commands (no paramsSet guard — safe to always handle) ─────
-            case "stop_stream":
-            case "stop_recording":
+            case IDENTITY:
+                sendResponse(connectionManager,cmd,cmdId,deviceInfoStatic.getAll());
+                break;
+
+            //Stop commands no paramsSet guard
+            case STOP_STREAM:
+            case STOP_RECORDING:
                 streamRoute.route(json);
                 break;
 
-            // ── Media / stream commands (require paramsSet) ───────────────────
-            case "start_stream":
-            case "start_recording":
-            case "play":
-            case "pause":
-            case "mute":
-            case "flip":
-            case "rotate":
-            case "switch":
-            case "set_stream_res":
-            case "get_stream_res":
-            case "set_record_res":
-            case "get_record_res":
-            case "get_res":
-            case "webrtc_offer":
-            case "webrtc_ice":
+            case START_RECORDING:
+            case START_STREAM:
+            case PLAY:
+            case PAUSE:
+            case MUTE:
+            case FLIP:
+            case ROTATE:
+            case SWITCH:
+            case SET_RECORD_RES:
+            case SET_STREAM_RES:
+            case WEBRTC_ICE:
+            case WEBRTC_OFFER:
                 if (!is_params_set) {
-                    sendNack(connectionManager, cmdId, cmd, "Params not set");
+                    sendError(connectionManager, cmdId, cmd, "Params not set");
                     return;
                 }
                 streamRoute.route(json);
                 break;
 
             default:
-                sendNack(connectionManager, cmdId, cmd, "Unknown command");
+                sendError(connectionManager, cmdId, cmd, "Unknown command");
                 break;
         }
     }
 
-// ─── Param handlers ───────────────────────────────────────────────────────
-
-    /**
-     * Responds to get_params with current device capabilities and state.
-     *
-     * Sends:
-     * { "type":"ack", "cmd":"get_params", "cmdId":"...",
-     *   "params": { "high_fps_support":bool, "stream_type":"...", "is_params_set":bool } }
-     */
-    private void sendParams(JSONObject node) {
-        String cmdId = node.optString("cmdId", "");
+    private void sendParams(JSONObject json) {
         try {
-            JSONObject params = new JSONObject();
-            params.put("high_fps_support", high_fps_support);
-            params.put("stream_type", stream_type != null ? stream_type.name() : StreamMode.None.name());
-            params.put("is_params_set", is_params_set);
+            JSONObject data = new JSONObject();
+            data.put(HF_SUPPORT, high_fps_support);
+            data.put(STREAM_MODE, streamMode.name());
+            data.put(PARAMS_SET, is_params_set);
 
-            JSONObject res = new JSONObject();
-            res.put("type",   "ack");
-            res.put("cmd",    "get_params");
-            res.put("cmdId",  cmdId);
-            res.put("params", params);
+            sendResponse(connectionManager,GET_PARAMS,CMD_ID,data);
 
-            connectionManager.send(res);
-        } catch (JSONException e) {
-            logger.log(TAG + ": sendParams error " + e);
-            Log.e(TAG, "sendParams error", e);
-            sendNack(connectionManager, cmdId, "get_params", "Internal error building params");
+        } catch (Exception e) {
+            e.printStackTrace();
+            sendError(connectionManager, CMD_ID, GET_PARAMS, "Internal error building params");
         }
     }
 
-    /**
-     * Applies the requested stream mode. Resets and recreates StreamRoute on change.
-     *
-     * Expected incoming fields: stream_type (string: "webrtc"|"h264"|"hfh264"|"none")
-     */
     private void setParams(JSONObject json) {
-        String cmdId = json.optString("cmdId", "");
-
-        StreamMode mode = StreamMode.fromString(json.optString("stream_type", null));
+        String cmdId = json.optString(CMD_ID, EMPTY);
+        // Todo Implement this
+        String telem_rate = json.optString(TELEMETRY_RATE, EMPTY);
+        StreamMode mode = StreamMode.fromString(json.optString(STREAM_MODE, EMPTY));
 
         if (mode == null) {
-            sendNack(connectionManager, cmdId, "set_params", "Unknown / invalid stream_type");
+            sendError(connectionManager, cmdId, SET_PARAMS, "Invalid Stream Mode");
             return;
         }
 
         if (mode == StreamMode.HFH264 && !high_fps_support) {
-            sendNack(connectionManager, cmdId, "set_params", "High FPS not supported on this device");
+            sendError(connectionManager, cmdId, SET_PARAMS, "High FPS not supported on this device");
             return;
         }
 
-        stream_type = mode;
+        streamMode = mode;
 
         // Stop any running stream before switching mode
         if (streamRoute != null) {
+            if (streamRoute.isRecording() || streamRoute.isStreaming()) {
+                String reason = streamRoute.isRecording()? "Recording Active Can't Switch": "Stream Active Can't Switch";
+                sendError(connectionManager, cmdId, SET_PARAMS, reason);
+                return;
+            }
             streamRoute.stopStream();
         }
-        streamRoute = new StreamRoute(connectionManager, this, ctx, stream_type);
+
+        streamRoute = new StreamRoute(connectionManager, this, ctx, streamMode);
         is_params_set = true;
 
-        sendAck(connectionManager, cmdId, "set_params");
+        sendResponse(connectionManager, SET_PARAMS ,  cmdId ,null);
+
+        // make sure parameters are updated on user side
+        sendParams(null);
     }
-
-// ─── Device-info handler ──────────────────────────────────────────────────
-
-    /**
-     * Handles server-initiated device info queries.
-     *
-     * cmd="stats"    → dynamic info (CPU, mem, battery, …)
-     * cmd="identity" → static info (model, OS version, …)
-     *
-     * Sends:
-     * { "type":"ack", "cmd":"stats"|"identity", "cmdId":"...", "params":{...} }
-     */
-    private void handleDeviceInfo(JSONObject json) {
-        String cmd   = json.optString("cmd", "");
-        String cmdId = json.optString("cmdId", "");
-        try {
-            JSONObject res = new JSONObject();
-            res.put("type",  "ack");
-            res.put("cmd",   cmd);
-            res.put("cmdId", cmdId);
-
-            if (cmd.equals("stats")) {
-                JSONObject params = new JSONObject();
-                params.put("packet", deviceInfoDynamic.getPacket());
-                res.put("params", params);
-            } else if (cmd.equals("identity")) {
-                res.put("params", deviceInfoStatic.getAll());
-            }
-
-            connectionManager.send(res);
-        } catch (JSONException e) {
-            sendNack(connectionManager, cmdId, cmd, "JSON error building device info");
-        }
-    }
-
-// ─── Camera capability ────────────────────────────────────────────────────
 
     private static boolean hasHighFpsCamera() {
         try {
@@ -263,47 +216,43 @@ public class Router{
         return false;
     }
 
-// ─── ACK / NACK helpers (package-visible for sub-routers) ─────────────────
 
-    /**
-     * Sends a success acknowledgement.
-     *
-     * Format: { "type":"ack", "cmd":"<cmd>", "cmdId":"<cmdId>" }
-     */
-    void sendAck(ConnectionManager cm, String cmdId, String cmd) {
+    void sendResponse(ConnectionManager cm, String cmd, String cmdId, JSONObject data) {
         try {
             JSONObject res = new JSONObject();
-            res.put("type",  "ack");
-            res.put("cmd",   cmd);
-            res.put("cmdId", cmdId);
+            res.put(TYPE, RESPONSE);
+            res.put(CMD, cmd);
+            res.put(CMD_ID, cmdId);
+            res.put(STATUS, STATUS_OK);
+            if (data != null){
+                res.put(DATA, data);
+            }
             cm.send(res);
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            e.printStackTrace();
+            // TODO LOG
+        }
     }
 
-    /**
-     * Sends a failure acknowledgement.
-     *
-     * Format: { "type":"nack", "cmd":"<cmd>", "cmdId":"<cmdId>", "error":"<reason>" }
-     */
-    void sendNack(ConnectionManager cm, String cmdId, String cmd, String error) {
+    void sendError(ConnectionManager cm, String cmdId, String cmd, String error) {
         try {
             JSONObject res = new JSONObject();
-            res.put("type",  "nack");
-            res.put("cmd",   cmd);
-            res.put("cmdId", cmdId);
-            res.put("error", error);
+            res.put(TYPE,  ERROR);
+            res.put(CMD,   cmd);
+            res.put(CMD_ID, cmdId);
+            res.put(ERROR, error);
             cm.send(res);
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            e.printStackTrace();
+            // TODO LOG
+        }
     }
 
-// ─── Lifecycle ────────────────────────────────────────────────────────────
 
     public void stop() {
         if (tunnelRoute != null) tunnelRoute.stopTunnel();
         if (streamRoute != null) streamRoute.stopStream();
     }
-
-// ─── Telemetry status nibble ──────────────────────────────────────────────
 
     /**
      * Returns a single hex char encoding live status bits:

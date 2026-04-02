@@ -1,5 +1,7 @@
 package com.github.nikipo.ussoi.system.deviceInfo;
 
+import static com.github.nikipo.ussoi.ui.UssoiStrings.STATS;
+
 import android.Manifest;
 import android.app.ActivityManager;
 import android.content.Context;
@@ -120,7 +122,19 @@ public class DeviceInfoDynamic {
     // COMPACT BINARY PACKET
     // =========================================================================
 
-    public String getPacket() {
+    public JSONObject buildSerialPacket() {
+        JSONObject root = new JSONObject();
+        try {
+            root.put(STATS, getPacket());
+        }
+        catch (Exception e){
+            e.printStackTrace();
+            // TODO LOG
+        }
+        return root;
+    }
+
+    private String getPacket() {
         try {
             ActivityManager.MemoryInfo mi = getMemoryInfo();
             long[]  extRaw    = getExternalVolumesRaw();

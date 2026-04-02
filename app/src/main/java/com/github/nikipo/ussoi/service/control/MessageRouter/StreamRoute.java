@@ -1,16 +1,15 @@
 package com.github.nikipo.ussoi.service.control.MessageRouter;
 
+import static com.github.nikipo.ussoi.ui.UssoiStrings.*;
+
 import android.content.Context;
 
-import com.github.nikipo.ussoi.media.CameraControl;
 import com.github.nikipo.ussoi.media.HFH264.HighFpsH264Media;
 import com.github.nikipo.ussoi.media.Media;
 import com.github.nikipo.ussoi.media.h264.H264Media;
 import com.github.nikipo.ussoi.media.webrtc.WebRtcMedia;
 import com.github.nikipo.ussoi.service.control.ConnectionManager;
-import com.github.nikipo.ussoi.tunnel.Tunnel;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -82,25 +81,10 @@ public class StreamRoute  {
         }
     }
 
-    // ─── Public state queries ─────────────────────────────────────────────────
-
     public void stopStream()    { media.stop(); }
     public boolean isStreaming()  { return media.IsStreaming(); }
     public boolean isRecording()  { return media.IsRecording(); }
 
-    // ─── Command dispatcher ───────────────────────────────────────────────────
-
-    /**
-     * Routes an incoming server command to the correct Media call.
-     * Every case sends an ACK or NACK back to the server.
-     *
-     * Incoming format:
-     * { "cmd":"<cmd>", "cmdId":"<uuid>", "deviceId":"...", ...extra fields... }
-     *
-     * ACK format  : { "type":"ack",  "cmd":"<cmd>", "cmdId":"<uuid>" }
-     * NACK format : { "type":"nack", "cmd":"<cmd>", "cmdId":"<uuid>", "error":"<reason>" }
-     * Data ACK    : { "type":"ack",  "cmd":"<cmd>", "cmdId":"<uuid>", "params":{...} }
-     */
     public void route(JSONObject json) {
         String cmd   = json.optString("cmd", "");
         String cmdId = json.optString("cmdId", "");
@@ -108,33 +92,36 @@ public class StreamRoute  {
         try {
             switch (cmd) {
 
-                // ── Stream ────────────────────────────────────────────────────
-
-                case "start_stream": {
+                case START_STREAM: {
                     short r = media.StartStream();
-                    if (r == 0) router.sendAck(connectionManager, cmdId, cmd);
-                    else        router.sendNack(connectionManager, cmdId, cmd, "Start stream failed: " + r);
+
+                    if (r == 0) router.sendResponse(connectionManager, cmdId, cmd,null);
+                    else if (r == -1) router.sendError(connectionManager, cmdId, cmd, "Stream Encoder Null");
+                    else if (r == -2) router.sendError(connectionManager, cmdId, cmd, "Stream Already Running");
+
                     break;
                 }
 
-                case "stop_stream": {
+                case STOP_STREAM: {
+                    if (media.IsRecording())  {
+                        router.sendError(connectionManager, cmdId, cmd, "Recording Active");
+                       break;
+                    }
                     media.stop();
-                    router.sendAck(connectionManager, cmdId, cmd);
+                    router.sendResponse(connectionManager, cmdId, cmd,null);
                     break;
                 }
-
-                // ── Recording ─────────────────────────────────────────────────
 
                 case "start_recording": {
                     short r = media.StartRecording();
-                    if (r == 0) router.sendAck(connectionManager, cmdId, cmd);
-                    else        router.sendNack(connectionManager, cmdId, cmd, "Start recording failed: " + r);
+                    if (r == 0) router.sendResponse(connectionManager, cmdId, cmd);
+                    else        router.sendError(connectionManager, cmdId, cmd, "Start recording failed: " + r);
                     break;
                 }
 
                 case "stop_recording": {
                     media.StopRecording();
-                    router.sendAck(connectionManager, cmdId, cmd);
+                    router.sendResponse(connectionManager, cmdId, cmd);
                     break;
                 }
 
@@ -142,22 +129,22 @@ public class StreamRoute  {
 
                 case "play": {
                     media.StreamMute(false);
-                    router.sendAck(connectionManager, cmdId, cmd);
+                    router.sendResponse(connectionManager, cmdId, cmd);
                     break;
                 }
 
                 case "pause": {
                     media.StreamMute(true);
-                    router.sendAck(connectionManager, cmdId, cmd);
+                    router.sendResponse(connectionManager, cmdId, cmd);
                     break;
                 }
 
                 case "mute": {
                     if (streamMode == StreamMode.WebRtc) {
                         ((WebRtcMedia) media).AudioMute();
-                        router.sendAck(connectionManager, cmdId, cmd);
+                        router.sendResponse(connectionManager, cmdId, cmd);
                     } else {
-                        router.sendNack(connectionManager, cmdId, cmd, "Audio mute only supported in WebRTC mode");
+                        router.sendError(connectionManager, cmdId, cmd, "Audio mute only supported in WebRTC mode");
                     }
                     break;
                 }
@@ -166,22 +153,22 @@ public class StreamRoute  {
 
                 case "flip": {
                     short r = media.FlipCamera();
-                    if (r == 0) router.sendAck(connectionManager, cmdId, cmd);
-                    else        router.sendNack(connectionManager, cmdId, cmd, "Flip failed: " + r);
+                    if (r == 0) router.sendResponse(connectionManager, cmdId, cmd);
+                    else        router.sendError(connectionManager, cmdId, cmd, "Flip failed: " + r);
                     break;
                 }
 
                 case "rotate": {
                     short r = media.RotateCamera();
-                    if (r == 0) router.sendAck(connectionManager, cmdId, cmd);
-                    else        router.sendNack(connectionManager, cmdId, cmd, "Rotate failed: " + r);
+                    if (r == 0) router.sendResponse(connectionManager, cmdId, cmd);
+                    else        router.sendError(connectionManager, cmdId, cmd, "Rotate failed: " + r);
                     break;
                 }
 
                 case "switch": {
                     short r = media.SwitchCamera();
-                    if (r == 0) router.sendAck(connectionManager, cmdId, cmd);
-                    else        router.sendNack(connectionManager, cmdId, cmd, "Camera switch failed: " + r);
+                    if (r == 0) router.sendResponse(connectionManager, cmdId, cmd);
+                    else        router.sendError(connectionManager, cmdId, cmd, "Camera switch failed: " + r);
                     break;
                 }
 
@@ -191,7 +178,7 @@ public class StreamRoute  {
                     // FIX: was "params1" (typo) — corrected to "params"
                     JSONObject params = json.optJSONObject("params");
                     if (params == null) {
-                        router.sendNack(connectionManager, cmdId, cmd, "Missing params object");
+                        router.sendError(connectionManager, cmdId, cmd, "Missing params object");
                         break;
                     }
                     boolean ok = true;
@@ -209,15 +196,15 @@ public class StreamRoute  {
                             if (media.SetStreamBitrate(bitrate) != 0) ok = false;
                         }
                     }
-                    if (ok) router.sendAck(connectionManager, cmdId, cmd);
-                    else    router.sendNack(connectionManager, cmdId, cmd, "Failed to apply stream resolution/bitrate");
+                    if (ok) router.sendResponse(connectionManager, cmdId, cmd);
+                    else    router.sendError(connectionManager, cmdId, cmd, "Failed to apply stream resolution/bitrate");
                     break;
                 }
 
                 case "set_record_res": {
                     JSONObject params = json.optJSONObject("params");
                     if (params == null) {
-                        router.sendNack(connectionManager, cmdId, cmd, "Missing params object");
+                        router.sendError(connectionManager, cmdId, cmd, "Missing params object");
                         break;
                     }
                     boolean ok = true;
@@ -235,36 +222,20 @@ public class StreamRoute  {
                             if (media.SetRecordingBitrate(bitrate) != 0) ok = false;
                         }
                     }
-                    if (ok) router.sendAck(connectionManager, cmdId, cmd);
-                    else    router.sendNack(connectionManager, cmdId, cmd, "Failed to apply record resolution/bitrate");
+                    if (ok) router.sendResponse(connectionManager, cmdId, cmd);
+                    else    router.sendError(connectionManager, cmdId, cmd, "Failed to apply record resolution/bitrate");
                     break;
                 }
-
-                // ── Resolution getters (data responses) ───────────────────────
-
-                case "get_res":
-                case "get_stream_res":
-                case "get_record_res": {
-                    JSONObject resolutions = media.SupportedResolutions();
-                    JSONObject res = new JSONObject();
-                    res.put("type",  "ack");
-                    res.put("cmd",   cmd);
-                    res.put("cmdId", cmdId);
-                    if (resolutions != null) res.put("params", resolutions);
-                    connectionManager.send(res);
-                    break;
-                }
-
                 // ── WebRTC ────────────────────────────────────────────────────
 
                 case "webrtc_offer": {
                     if (streamMode != StreamMode.WebRtc) {
-                        router.sendNack(connectionManager, cmdId, cmd, "Not in WebRTC mode");
+                        router.sendError(connectionManager, cmdId, cmd, "Not in WebRTC mode");
                         break;
                     }
                     JSONObject params = json.optJSONObject("params");
                     if (params == null) {
-                        router.sendNack(connectionManager, cmdId, cmd, "Missing SDP params");
+                        router.sendError(connectionManager, cmdId, cmd, "Missing SDP params");
                         break;
                     }
                     // Echo cmdId and userId into params so WebRtcMedia can include
@@ -281,12 +252,12 @@ public class StreamRoute  {
 
                 case "webrtc_ice": {
                     if (streamMode != StreamMode.WebRtc) {
-                        router.sendNack(connectionManager, cmdId, cmd, "Not in WebRTC mode");
+                        router.sendError(connectionManager, cmdId, cmd, "Not in WebRTC mode");
                         break;
                     }
                     JSONObject params = json.optJSONObject("params");
                     if (params == null) {
-                        router.sendNack(connectionManager, cmdId, cmd, "Missing ICE params");
+                        router.sendError(connectionManager, cmdId, cmd, "Missing ICE params");
                         break;
                     }
                     params.put("cmdId",  cmdId);
@@ -299,12 +270,12 @@ public class StreamRoute  {
                 }
 
                 default:
-                    router.sendNack(connectionManager, cmdId, cmd, "Unknown stream command: " + cmd);
+                    router.sendError(connectionManager, cmdId, cmd, "Unknown command: " + cmd);
                     break;
             }
 
         } catch (Exception e) {
-            router.sendNack(connectionManager, cmdId, cmd, "Internal error: " + e.getMessage());
+            router.sendError(connectionManager, cmdId, cmd, "Internal error: " + e.getMessage());
             e.printStackTrace();
         }
     }

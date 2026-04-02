@@ -811,4 +811,62 @@ public final class GlRenderer {
         if (ex[0] instanceof RuntimeException) throw (RuntimeException) ex[0];
         if (ex[0] != null) throw new RuntimeException(ex[0]);
     }
+
+    // =========================================================================
+// Builder
+// =========================================================================
+
+    public static final class Builder {
+
+        private final int hqWidth, hqHeight;
+        private final int lqWidth, lqHeight;
+
+        private ScaleMode          hqScaleMode          = ScaleMode.CROP;
+        private ScaleMode          lqScaleMode          = ScaleMode.CROP;
+        private ContextLostCallback contextLostCallback  = null;
+        private int                srcWidth             = 0;
+        private int                srcHeight            = 0;
+
+        public Builder(int hqWidth, int hqHeight, int lqWidth, int lqHeight) {
+            this.hqWidth  = hqWidth;
+            this.hqHeight = hqHeight;
+            this.lqWidth  = lqWidth;
+            this.lqHeight = lqHeight;
+        }
+
+        /** Sets the same ScaleMode for both HQ and LQ surfaces. */
+        public Builder scaleMode(ScaleMode mode) {
+            this.hqScaleMode = mode;
+            this.lqScaleMode = mode;
+            return this;
+        }
+
+        /** Sets ScaleModes independently for HQ and LQ surfaces. */
+        public Builder scaleMode(ScaleMode hq, ScaleMode lq) {
+            this.hqScaleMode = hq;
+            this.lqScaleMode = lq;
+            return this;
+        }
+
+        public Builder contextLostCallback(ContextLostCallback cb) {
+            this.contextLostCallback = cb;
+            return this;
+        }
+
+        /** Optional — if not set, GlRenderer defaults src dimensions to HQ size. */
+        public Builder sourceDimensions(int width, int height) {
+            this.srcWidth  = width;
+            this.srcHeight = height;
+            return this;
+        }
+
+        public GlRenderer build(Context context) {
+            GlRenderer r = new GlRenderer(context, hqWidth, hqHeight, lqWidth, lqHeight);
+            r.setHqScaleMode(hqScaleMode);
+            r.setLqScaleMode(lqScaleMode);
+            if (contextLostCallback != null) r.setContextLostCallback(contextLostCallback);
+            if (srcWidth > 0 && srcHeight > 0) r.setSourceDimensions(srcWidth, srcHeight);
+            return r;
+        }
+    }
 }
