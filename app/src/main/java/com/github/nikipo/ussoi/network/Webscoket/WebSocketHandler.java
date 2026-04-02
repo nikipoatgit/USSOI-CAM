@@ -26,7 +26,7 @@ import okhttp3.WebSocketListener;
 import okio.ByteString;
 
 public class WebSocketHandler {
-    private static final String TAG = "ConnHandle";
+    private static final String TAG = "WebSocketHandler";
 
     // Use a Main Looper handler for UI thread callbacks
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -62,7 +62,7 @@ public class WebSocketHandler {
         // Setup OkHttp with timeouts
         this.client = new OkHttpClient.Builder()
                 .readTimeout(0, TimeUnit.MILLISECONDS) // WebSockets should generally have 0 read timeout (keep alive)
-                .pingInterval(30, TimeUnit.SECONDS)    // Keep connection alive
+                .pingInterval(0, TimeUnit.SECONDS)    // DISABLED
                 .build();
 
         this.logging = Logging.getIfInitialized();
