@@ -36,35 +36,42 @@ import java.util.List;
  * <p>
  * *****************************************************************************
  */
-public class TunnelRoute {
+public class TunnelRoute  {
 
     private static final String TAG = "TunnelRoute";
-    private Context context;
-    private Router router;
-    private SharedPreferences preferences;
-    private ConnectionManager connectionManager;
-    // HW BT AND USB
-    private boolean useBT;
-    private boolean useUSB;
-    public final List<BluetoothDevice> selectedBtDevices;
-    private List<Tunnel> tunnels = new ArrayList<>();
+    private final Context context;
+    private final Router router;
+    private final SharedPreferences preferences;
+    private final ConnectionManager connectionManager;
 
-    public TunnelRoute(ConnectionManager connectionManager,Router router,Context ctx){
+    private final boolean useBT;
+    private final boolean useUSB;
+    public final List<BluetoothDevice> selectedBtDevices;
+    private final List<Tunnel> tunnels = new ArrayList<>();
+
+    public TunnelRoute(ConnectionManager connectionManager, Router router, Context ctx) {
         this.context = ctx;
         this.router = router;
         this.connectionManager = connectionManager;
         preferences = SaveInputFields.getInstance(ctx).get_shared_pref();
         selectedBtDevices = SaveInputFields.selectedBtDevices;
-        useBT = preferences.getBoolean(KEY_BT_SWITCH,false);
-        useUSB = preferences.getBoolean(KEY_USB_Switch,false);
+        useBT  = preferences.getBoolean(KEY_BT_SWITCH, false);
+        useUSB = preferences.getBoolean(KEY_USB_Switch, false);
 
         if (useBT) {
             initBtTunnels(ctx);
             Log.d(TAG, "Tunnel created: BluetoothHandler");
         } else if (useUSB) {
-            tunnels.add(UsbHandler.getInstance(ctx));   // UsbHandler is a singleton itself
+            tunnels.add(UsbHandler.getInstance(ctx));
             Log.d(TAG, "Tunnel created: UsbHandler");
         } else {
+            // No-op tunnel placeholder so the list is never empty
+            tunnels.add(new Tunnel() {
+                @Override public void init()               {}
+                @Override public void close()              {}
+                @Override public boolean isTunnelRunning() { return false; }
+                @Override public String getTunnelName()    { return ""; }
+            });
             Log.w(TAG, "No tunnel type selected in preferences");
         }
     }
@@ -77,116 +84,140 @@ public class TunnelRoute {
         }
     }
 
-    public void route(JSONObject json) {
-        try {
-            String cmd   = json.optString("cmd", "");
-            String cmdId = json.optString("cmdId", "");
-            JSONObject payload = json.optJSONObject("payload");
+    // ─── Command dispatcher ───────────────────────────────────────────────────
 
+    /**
+     * Routes an incoming tunnel command.
+     *
+     * start_tunnel / stop_tunnel expect: { ..., "tunnelName":"<name>" }
+     * get_tunnels  returns an ACK with the list of all tunnel names.
+     *
+     * ACK  : { "type":"ack",  "cmd":"<cmd>", "cmdId":"<uuid>" }
+     * NACK : { "type":"nack", "cmd":"<cmd>", "cmdId":"<uuid>", "error":"<reason>" }
+     * Data : { "type":"ack",  "cmd":"get_tunnels", "cmdId":"<uuid>",
+     *           "tunnels":["name1","name2",...] }
+     */
+    public void route(JSONObject json) {
+        String cmd        = json.optString("cmd",        "");
+        String cmdId      = json.optString("cmdId",      "");
+        String tunnelName = json.optString("tunnelName", "");   // top-level field, not inside payload
+
+        try {
             switch (cmd) {
 
-                case "start_tunnel":
-                    if (startTunnel(payload != null ? payload.optInt("tunnelId", -1) : -1)) {
-                        router.sendAck(connectionManager, cmdId, "Tunnel Started");
+                case "start_tunnel": {
+                    if (startTunnel(tunnelName)) {
+                        router.sendAck(connectionManager, cmdId, cmd);
                     } else {
-                        router.sendNack(connectionManager, cmdId, "Tunnel Issue / not selected");
+                        router.sendNack(connectionManager, cmdId, cmd,
+                                "Tunnel '" + tunnelName + "' not found or failed to start");
                     }
                     break;
+                }
 
-                case "stop_tunnel":
-                    if (stopTunnel( payload != null ? payload.optInt("tunnelId", -1) : -1)) {
-                        router.sendAck(connectionManager, cmdId, "Tunnel Stopped");
+                case "stop_tunnel": {
+                    if (stopTunnel(tunnelName)) {
+                        router.sendAck(connectionManager, cmdId, cmd);
                     } else {
-                        router.sendNack(connectionManager, cmdId, "Tunnel Issue / not selected");
+                        router.sendNack(connectionManager, cmdId, cmd,
+                                "Tunnel '" + tunnelName + "' not found or failed to stop");
                     }
                     break;
+                }
 
                 case "get_tunnels": {
-
-                    JSONObject res = new JSONObject();
-                    res.put("type", "data");
-                    res.put("cmd", "tunnels");
-                    res.put("cmdId", cmdId);
-                    res.put("timestamp", System.currentTimeMillis());
-
+                    // Build array of tunnel names
                     JSONArray tunnelsArray = new JSONArray();
-                    if (tunnels != null) {
-                        for (Tunnel t : tunnels) {
-                            if (t != null && t.getTunnelName() != null) {
-                                tunnelsArray.put(t.getTunnelName());
+                    for (Tunnel t : tunnels) {
+                        if (t != null) {
+                            String name = t.getTunnelName();
+                            if (name != null && !name.isEmpty()) {
+                                tunnelsArray.put(name);
                             }
                         }
                     }
 
-                    JSONObject payload1 = new JSONObject();
-                    payload1.put("tunnels", tunnelsArray);
-                    res.put("payload", payload1);
-
+                    // ACK format expected by server's processGetTunnels handler:
+                    // { "type":"ack", "cmd":"get_tunnels", "cmdId":"...", "tunnels":["t1","t2"] }
+                    JSONObject res = new JSONObject();
+                    res.put("type",    "ack");
+                    res.put("cmd",     "get_tunnels");
+                    res.put("cmdId",   cmdId);
+                    res.put("tunnels", tunnelsArray);
                     connectionManager.send(res);
-//                    {
-//                        "type": "data",
-//                            "cmd": "tunnels",
-//                            "cmdId": "c9012",
-//                            "timestamp": 1710000001,
-//                            "payload": {
-//                        "tunnels": ["tunn1","tunn2","tunn3"]
-//                    }
                     break;
                 }
 
                 default:
-                    router.sendNack(connectionManager, cmdId, cmd);
+                    router.sendNack(connectionManager, cmdId, cmd, "Unknown tunnel command: " + cmd);
                     break;
             }
 
         } catch (Exception e) {
+            router.sendNack(connectionManager, cmdId, cmd, "Internal error: " + e.getMessage());
             e.printStackTrace();
         }
     }
 
-    public  boolean isTunnelRunning(){
-        // todo implement this
-        return true;
-    }
-    private boolean startTunnel(int tunnelId) {
-        if (tunnels == null || tunnelId < 0 || tunnelId >= tunnels.size()) {
-            return false;
+    // ─── Tunnel lookup ────────────────────────────────────────────────────────
+
+    /**
+     * Finds a tunnel by its name string (matching getTunnelName()).
+     * Returns null if no match is found.
+     */
+    private Tunnel findTunnel(String name) {
+        if (name == null || name.isEmpty()) return null;
+        for (Tunnel t : tunnels) {
+            if (t != null && name.equals(t.getTunnelName())) return t;
         }
+        return null;
+    }
 
-        Tunnel t = tunnels.get(tunnelId);
+    private boolean startTunnel(String tunnelName) {
+        Tunnel t = findTunnel(tunnelName);
         if (t == null) return false;
-
         try {
-            // todo set repeat guard
             t.init();
             return true;
         } catch (Exception e) {
+            Log.e(TAG, "startTunnel failed: " + tunnelName, e);
             return false;
         }
     }
 
-    private boolean stopTunnel(int tunnelId) {
-        if (tunnels == null || tunnelId < 0 || tunnelId >= tunnels.size()) {
-            return false;
-        }
-
-        Tunnel t = tunnels.get(tunnelId);
+    private boolean stopTunnel(String tunnelName) {
+        Tunnel t = findTunnel(tunnelName);
         if (t == null) return false;
-
         try {
             t.close();
             return true;
         } catch (Exception e) {
+            Log.e(TAG, "stopTunnel failed: " + tunnelName, e);
             return false;
         }
     }
 
-    public void stopTunnel() {
+    // ─── Status / lifecycle ───────────────────────────────────────────────────
 
+    /**
+     * Returns true if at least one tunnel in the list is currently running.
+     */
+    public boolean isTunnelRunning() {
+        for (Tunnel t : tunnels) {
+            if (t != null && t.isTunnelRunning()) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Closes all active tunnels (called on service shutdown).
+     */
+    public void stopTunnel() {
         for (Tunnel t : tunnels) {
             try {
-                t.close();
+                if (t != null) t.close();
             } catch (Exception e) {
+                Log.e(TAG, "Error closing tunnel: " + e.getMessage(), e);
             }
         }
     }

@@ -110,7 +110,7 @@ public class ServiceManager extends Service implements LifecycleOwner {
                 new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
                         android.widget.Toast.makeText(
                                 ServiceManager.this,
-                                "Authentication failed",
+                                "Authentication failed " + error,
                                 android.widget.Toast.LENGTH_LONG
                         ).show()
                 );
@@ -139,11 +139,11 @@ public class ServiceManager extends Service implements LifecycleOwner {
             connectionManager = null;
         }
 
-        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
-
-        if (logger != null) {
+        if (logger != null){
             logger.closeLogging();
         }
+        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+
     }
 
     @Nullable

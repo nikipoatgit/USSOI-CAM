@@ -37,7 +37,7 @@ public class ConnectionManager {
         saveInputFields = SaveInputFields.getInstance(ctx);
         this.prefs = saveInputFields.get_shared_pref();
 
-        router= new Router();
+        router= new Router(this,context);
     }
 
     public static ConnectionManager getInstance(Context ctx, String url){
@@ -165,6 +165,7 @@ public class ConnectionManager {
                         // Build combined status object
                         JSONObject obj = new JSONObject();
                         obj.put("type", "telem");
+                        obj.put("cmd", "telem");
                         obj.put("hex", telemetry.getPacket() + sender.getStatusTelem());
 
                         sender.send(obj);

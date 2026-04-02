@@ -15,9 +15,8 @@ import android.view.Surface;
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
 
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
-
 
 /**
  * *****************************************************************************
@@ -34,19 +33,36 @@ import java.util.List;
  * without warranty of any kind, express or implied.
  * <p>
  * *****************************************************************************
- */
-
-/*
+ *
  * High-speed camera controller for 60 / 120 / 240 FPS capture via
  * {@link CameraDevice#createConstrainedHighSpeedCaptureSession}.
  *
- * CRITICAL REQUIREMENTS enforced by the Camera2 high-speed API:
- *  - Both surfaces MUST be the SAME size.
- *  - Maximum 2 surfaces per session.
- *  - Only CONTROL_AE_MODE_ON is permitted; manual sensor controls are rejected.
- *  - Capture requests MUST be submitted via
- *    {@link CameraConstrainedHighSpeedCaptureSession#createHighSpeedRequestList}
- *    and {@link CameraConstrainedHighSpeedCaptureSession#setRepeatingBurst}.
+ * SINGLE-SURFACE DESIGN
+ * ─────────────────────
+ * Previously this controller received two surfaces (HQ + LQ) and passed both
+ * directly to the constrained high-speed session.  That caused:
+ *
+ *   IllegalArgumentException: The 2 output surfaces must have different type
+ *
+ * because both were MediaCodec input surfaces (same native consumer type).
+ *
+ * Now the controller receives exactly ONE surface — the SurfaceTexture surface
+ * owned by GlRenderer.  GlRenderer fans the frames out to the HQ and LQ
+ * encoder surfaces in OpenGL ES, completely outside the Camera2 session.
+ *
+ * EXTERNAL BEHAVIOUR PRESERVED
+ * ─────────────────────────────
+ * - start() / stop()                   — unchanged
+ * - pauseStreaming() / resumeStreaming() — unchanged (HQ-only / HQ+LQ bursts
+ *                                         are now equivalent; the GL renderer
+ *                                         controls what encoders receive frames)
+ * - getHighSpeedCapabilities()          — unchanged (static, no surface involved)
+ * - HighSpeedCapabilities               — unchanged
+ *
+ * REMOVED
+ * ───────
+ * - attachHQSurface() / attachLQSurface() — replaced by attachCameraSurface()
+ * - hqOnlyRequestList / hqLqRequestList   — only one request list needed now
  */
 public final class HighFPSCameraController {
 
@@ -57,38 +73,63 @@ public final class HighFPSCameraController {
     private CameraDevice cameraDevice;
     private CameraConstrainedHighSpeedCaptureSession captureSession;
 
-    private Surface hqSurface;
-    private Surface lqSurface;
+    // The single surface that the Camera2 session targets.
+    // This is the SurfaceTexture surface from GlRenderer — NOT an encoder surface.
+    private Surface cameraSurface;
 
     private HandlerThread  cameraThread;
     private Handler        cameraHandler;
     private Range<Integer> targetRange = null;
 
-    private List<CaptureRequest> hqOnlyRequestList;
-    private List<CaptureRequest> hqLqRequestList;
+    // Only one request list — the camera always runs at full speed.
+    // Streaming pause / resume is now handled by GlRenderer (it stops pushing
+    // frames to the LQ encoder surface) rather than by swapping request lists.
+    private List<CaptureRequest> requestList;
 
-    /**
-     * Tracks whether the LQ surface is currently included in the repeating burst.
-     * Starts false — streaming begins only after {@link #start} configures the session.
-     */
-    private volatile boolean isStreaming = false;
+    private volatile boolean isRunning = false;
 
     public HighFPSCameraController(Context ctx) {
         context = ctx.getApplicationContext();
     }
 
-    // Surface attachment
-    public synchronized void attachHQSurface(Surface surface) {
-        this.hqSurface = surface;
+    // ── Surface attachment ────────────────────────────────────────────────────
+
+    /**
+     * Attaches the single camera surface.
+     * Must be called before {@link #start}.
+     * This should be {@code glRenderer.getCameraSurface()}.
+     */
+    public synchronized void attachCameraSurface(Surface surface) {
+        this.cameraSurface = surface;
     }
 
-    public synchronized void attachLQSurface(Surface surface) {
-        this.lqSurface = surface;
+    /**
+     * Hot-swaps the camera surface while the session is running.
+     * Used by {@link com.github.nikipo.ussoi.media.HFH264.HighFpsH264Media}
+     * when the GlRenderer is rebuilt for a LQ-only resolution change.
+     *
+     * The current capture session is stopped and restarted with the new surface.
+     * The camera device is NOT closed — this avoids the ~300 ms open latency.
+     */
+    public synchronized void updateCameraSurface(Surface newSurface) {
+        this.cameraSurface = newSurface;
+
+        if (cameraDevice == null) return; // session not running; surface stored for next start()
+
+        // Close the current session and recreate with the new surface
+        if (captureSession != null) {
+            captureSession.close();
+            captureSession = null;
+        }
+        requestList = null;
+        createHighSpeedSession();
     }
 
-    // Static capability query (used by HighSpeedCameraHelper)
+    // ── Static capability query ───────────────────────────────────────────────
+
     /**
      * Returns high-speed capabilities for the given camera, or {@code null} on error.
+     * Unchanged from the original implementation.
      */
     public static HighSpeedCapabilities getHighSpeedCapabilities(Context ctx, String cameraId) {
         try {
@@ -126,13 +167,14 @@ public final class HighFPSCameraController {
         }
     }
 
-    // Start
+    // ── Start ─────────────────────────────────────────────────────────────────
+
     /**
      * Opens the camera and creates a constrained high-speed session.
-     * Both surfaces must be attached before calling this.
+     * {@link #attachCameraSurface} must be called before this.
      *
      * @param cameraId  Camera ID to open, or {@code null} for first available.
-     * @param size      Must match the size both encoders were prepared with.
+     * @param size      Must match the size the HQ encoder was prepared with.
      * @param targetFps Desired FPS; the best available range is selected automatically.
      */
     public synchronized void start(String cameraId, Size size, int targetFps) {
@@ -156,9 +198,10 @@ public final class HighFPSCameraController {
         }
     }
 
-    // Stop
+    // ── Stop ──────────────────────────────────────────────────────────────────
+
     public synchronized void stop() {
-        isStreaming = false;
+        isRunning = false;
 
         if (captureSession != null) { captureSession.close();  captureSession = null; }
         if (cameraDevice   != null) { cameraDevice.close();    cameraDevice   = null; }
@@ -168,43 +211,38 @@ public final class HighFPSCameraController {
             cameraHandler = null;
         }
 
-        hqOnlyRequestList = null;
-        hqLqRequestList   = null;
+        requestList = null;
     }
 
-    // Streaming pause / resume
+    // ── Streaming pause / resume ──────────────────────────────────────────────
+    //
+    // With a single surface the camera always runs at full speed regardless.
+    // GlRenderer is responsible for suppressing frames to the LQ encoder surface
+    // when streaming is "paused" (the HQ encoder always receives frames).
+    //
+    // These methods are kept with the same signature so HighFpsH264Media compiles
+    // unchanged.  They are no-ops here; the real work happens in
+    // StreamingEncoder.pauseStreaming() / resumeStreaming() which GlRenderer
+    // calls through to via HighFpsH264Media.StreamMute().
+
     /**
-     * Switches to HQ-only burst — LQ encoder stops receiving frames.
-     * Recording continues unaffected.
+     * No-op — streaming pause is handled by StreamingEncoder / GlRenderer.
+     * Kept for API compatibility.
      */
     public synchronized void pauseStreaming() {
-        if (captureSession == null || hqOnlyRequestList == null || !isStreaming) return;
-        try {
-            captureSession.stopRepeating();
-            captureSession.setRepeatingBurst(hqOnlyRequestList, null, cameraHandler);
-            isStreaming = false;
-            Log.d(TAG, "Streaming paused (HQ only)");
-        } catch (CameraAccessException e) {
-            Log.e(TAG, "pauseStreaming failed", e);
-        }
+        Log.d(TAG, "pauseStreaming — delegated to StreamingEncoder/GlRenderer");
     }
 
     /**
-     * Switches back to HQ + LQ burst — LQ encoder resumes receiving frames.
+     * No-op — streaming resume is handled by StreamingEncoder / GlRenderer.
+     * Kept for API compatibility.
      */
     public synchronized void resumeStreaming() {
-        if (captureSession == null || hqLqRequestList == null || isStreaming) return;
-        try {
-            captureSession.stopRepeating();
-            captureSession.setRepeatingBurst(hqLqRequestList, null, cameraHandler);
-            isStreaming = true;
-            Log.d(TAG, "Streaming resumed (HQ + LQ)");
-        } catch (CameraAccessException e) {
-            Log.e(TAG, "resumeStreaming failed", e);
-        }
+        Log.d(TAG, "resumeStreaming — delegated to StreamingEncoder/GlRenderer");
     }
 
-    // Camera callbacks
+    // ── Camera callbacks ──────────────────────────────────────────────────────
+
     private final CameraDevice.StateCallback cameraCallback = new CameraDevice.StateCallback() {
         @Override
         public void onOpened(@NonNull CameraDevice camera) {
@@ -233,10 +271,15 @@ public final class HighFPSCameraController {
         }
     };
 
-    // Session creation
+    // ── Session creation ──────────────────────────────────────────────────────
+
     private void createHighSpeedSession() {
         try {
-            List<Surface> surfaces = Arrays.asList(hqSurface, lqSurface);
+            // Single surface — the GlRenderer SurfaceTexture surface.
+            // This satisfies the Camera2 high-speed API which requires surfaces
+            // to be of different types when two are provided; here there is only
+            // one so the type check never triggers.
+            List<Surface> surfaces = Collections.singletonList(cameraSurface);
 
             cameraDevice.createConstrainedHighSpeedCaptureSession(
                     surfaces,
@@ -247,10 +290,11 @@ public final class HighFPSCameraController {
                             synchronized (HighFPSCameraController.this) {
                                 captureSession = (CameraConstrainedHighSpeedCaptureSession) session;
                                 try {
-                                    buildRequestLists();
-                                    captureSession.setRepeatingBurst(hqLqRequestList, null, cameraHandler);
-                                    isStreaming = true;
-                                    Log.d(TAG, "High-speed session started at " + targetRange + " FPS");
+                                    buildRequestList();
+                                    captureSession.setRepeatingBurst(requestList, null, cameraHandler);
+                                    isRunning = true;
+                                    Log.d(TAG, "High-speed session started at "
+                                            + targetRange + " FPS (single surface)");
                                 } catch (CameraAccessException e) {
                                     throw new RuntimeException(e);
                                 }
@@ -270,24 +314,15 @@ public final class HighFPSCameraController {
     }
 
     /**
-     * Builds both request lists from current state.
+     * Builds the single capture request list targeting the camera surface.
      * Must be called from within a synchronized block with an open session.
      */
-    private void buildRequestLists() throws CameraAccessException {
-        // HQ + LQ (streaming ON)
-        CaptureRequest.Builder hqLqBuilder =
+    private void buildRequestList() throws CameraAccessException {
+        CaptureRequest.Builder builder =
                 cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
-        hqLqBuilder.addTarget(hqSurface);
-        hqLqBuilder.addTarget(lqSurface);
-        applyHighSpeedParams(hqLqBuilder);
-        hqLqRequestList = captureSession.createHighSpeedRequestList(hqLqBuilder.build());
-
-        // HQ only (streaming PAUSED)
-        CaptureRequest.Builder hqOnlyBuilder =
-                cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
-        hqOnlyBuilder.addTarget(hqSurface);
-        applyHighSpeedParams(hqOnlyBuilder);
-        hqOnlyRequestList = captureSession.createHighSpeedRequestList(hqOnlyBuilder.build());
+        builder.addTarget(cameraSurface);
+        applyHighSpeedParams(builder);
+        requestList = captureSession.createHighSpeedRequestList(builder.build());
     }
 
     /**
@@ -300,7 +335,8 @@ public final class HighFPSCameraController {
         builder.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON);
     }
 
-    // Private helpers
+    // ── Private helpers ───────────────────────────────────────────────────────
+
     /**
      * Selects the best high-speed FPS range for the given size and target.
      *
@@ -354,9 +390,7 @@ public final class HighFPSCameraController {
         cameraHandler = new Handler(cameraThread.getLooper());
     }
 
-    // -------------------------------------------------------------------------
-    // Public inner class
-    // -------------------------------------------------------------------------
+    // ── Public inner class ────────────────────────────────────────────────────
 
     /** Carries the high-speed capabilities reported by the camera hardware. */
     public static class HighSpeedCapabilities {

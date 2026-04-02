@@ -26,10 +26,10 @@ public  class SaveInputFields {
     // --- Network & Connectivity ---
     public static final String KEY_url          = "ip";
     public static final String KEY_device_name    = "device_name";
-    public static final String KEY_control_api_path = "/ws/device/control";
+    public static final String KEY_control_api_path = "ws/device/control";
     public static final String KEY_auth_api_path = "api/device/authenticate";
-    public static final String KEY_stream_api_path = "/ws/device/mse";
-    public static final String KEY_data_api_path = "/ws/device/data";
+    public static final String KEY_stream_api_path = "ws/device/mse";
+    public static final String KEY_data_api_path = "ws/device/data";
     public static final String KEY_turn_list = "turnArray";
 
     // --- Feature Toggles (Switches) ---

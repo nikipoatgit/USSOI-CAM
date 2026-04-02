@@ -11,6 +11,7 @@ import android.util.Size;
 import android.view.Surface;
 
 import com.github.nikipo.ussoi.media.CameraControl;
+import com.github.nikipo.ussoi.media.camera.GlRenderer;
 import com.github.nikipo.ussoi.media.camera.HighSpeedCameraHelper;
 import com.github.nikipo.ussoi.media.Media;
 import com.github.nikipo.ussoi.media.camera.HighFPSCameraController;
@@ -40,44 +41,75 @@ import java.nio.ByteBuffer;
  * without warranty of any kind, express or implied.
  * <p>
  * *****************************************************************************
+ *
+ * PIPELINE
+ * ────────
+ *
+ *   Camera (constrained high-speed — ONE surface only)
+ *         │
+ *         ▼
+ *   GlRenderer  (SurfaceTexture → OpenGL ES → two EGLSurfaces)
+ *    ┌────┴──────────────────┐
+ *    ▼                       ▼
+ *  HQ EGLSurface          LQ EGLSurface
+ *  (videoWidth × videoHeight)  (lqWidth × lqHeight, CROP by default)
+ *    │                       │
+ *    ▼                       ▼
+ *  LocalRecorder          StreamingEncoder
+ *  (MediaRecorder/muxer)  (MediaCodec → drain thread → WebSocket)
+ *
+ * External behaviour is identical to the previous dual-surface design.
+ * The GlRenderer is transparent to all callers of Media / CameraControl.
  */
-
 public class HighFpsH264Media implements Media, CameraControl {
 
     private static final String TAG         = "HighFpsH246Media";
     private static final int    HEADER_SIZE = 1 + 8; // keyFrame flag + 8-byte PTS
+
     private Context               context;
     private Logging               logger;
     private SharedPreferences     preferences;
     private WebSocketHandler      webSocketHandler;
     private HighSpeedCameraHelper highSpeedCameraHelper;
 
-    // Config — HQ and LQ share the same size (high-speed API requirement)
-    private int videoWidth       = 1280;
-    private int videoHeight      = 720;
+    // ── Encoder config ────────────────────────────────────────────────────────
+    // HQ size = hardware-resolved high-speed size (recording).
+    // LQ size = streaming resolution; starts identical to HQ — GlRenderer
+    //           handles downscale via GL if they later diverge.
+    // Both default to 720p so the initial pipeline is symmetric.
+    private int videoWidth       = 1280;   // HQ width  (resolved from hardware)
+    private int videoHeight      = 720;    // HQ height (resolved from hardware)
     private int videoFps         = 60;
-    private int streamBitrateBps = 500_000;
-    private int recordBitrateBps = 8_000_000;
+    private int lqWidth          = 1280;   // LQ streaming width  (matches HQ at init)
+    private int lqHeight         = 720;    // LQ streaming height (matches HQ at init)
+    private int streamBitrateBps = 500_000;    //  500 kbps streaming
+    private int recordBitrateBps = 5_000_000;  // 5000 kbps recording
 
     private Size           currentSize;
     private Range<Integer> currentFpsRange;
 
-    // Camera
+    // ── Camera ────────────────────────────────────────────────────────────────
     private String                  currentCameraId = null;
     private HighFPSCameraController cameraController;
 
-    // Encoders + surfaces
+    // ── GL renderer ───────────────────────────────────────────────────────────
+    // Owns the SurfaceTexture the camera writes into, and renders each frame
+    // to hqSurface and lqSurface via OpenGL ES.
+    private GlRenderer glRenderer;
+
+    // ── Encoders + surfaces ───────────────────────────────────────────────────
     private LocalRecorder    localRecorder;
     private StreamingEncoder streamingEncoder;
-    private Surface          hqSurface;
-    private Surface          lqSurface;
+    private Surface          hqSurface;   // MediaRecorder input surface (HQ)
+    private Surface          lqSurface;   // MediaCodec  input surface (LQ)
 
-    // Drain thread
+    // ── Drain thread ──────────────────────────────────────────────────────────
     private Thread           drainThread;
     private volatile boolean drainRunning = false;
     private long             basePtsUs    = -1;
 
-    // Media — lifecycle
+    // ── Media — lifecycle ─────────────────────────────────────────────────────
+
     @Override
     public void init(Context ctx) {
         context      = ctx.getApplicationContext();
@@ -92,8 +124,9 @@ public class HighFpsH264Media implements Media, CameraControl {
             return;
         }
 
-        // Resolve hardware size (HQ == LQ, constrained by the high-speed API)
-        currentSize = highSpeedCameraHelper.getBestHighSpeedSize(currentCameraId, videoWidth, videoHeight, videoFps);
+        // Resolve hardware size from the high-speed camera API
+        currentSize = highSpeedCameraHelper.getBestHighSpeedSize(
+                currentCameraId, videoWidth, videoHeight, videoFps);
         if (currentSize == null) {
             logger.log(TAG + ": no suitable high-speed size found");
             return;
@@ -101,9 +134,17 @@ public class HighFpsH264Media implements Media, CameraControl {
         videoWidth  = currentSize.getWidth();
         videoHeight = currentSize.getHeight();
 
-        currentFpsRange = highSpeedCameraHelper.getBestHighSpeedFpsRange(currentCameraId, currentSize, videoFps);
+        // LQ starts at the same hardware-resolved size as HQ.
+        // SetStreamResolution() can lower it independently later.
+        lqWidth  = videoWidth;
+        lqHeight = videoHeight;
 
-        Log.d(TAG, "High-speed config: " + videoWidth + "x" + videoHeight+ " @ " + currentFpsRange + " FPS");
+        currentFpsRange = highSpeedCameraHelper.getBestHighSpeedFpsRange(
+                currentCameraId, currentSize, videoFps);
+
+        Log.d(TAG, "High-speed config: " + videoWidth + "x" + videoHeight
+                + " @ " + currentFpsRange + " FPS"
+                + "  LQ=" + lqWidth + "x" + lqHeight);
 
         // WebSocket
         webSocketHandler = new WebSocketHandler(context, new WebSocketHandler.MessageCallback() {
@@ -117,7 +158,9 @@ public class HighFpsH264Media implements Media, CameraControl {
                 KEY_stream_api_path,
                 preferences.getString(KEY_Session_KEY, "123"));
 
-        // Encoders — both prepared at the same resolved size
+        // Encoders
+        // HQ encoder: full hardware-resolved size (for recording)
+        // LQ encoder: independent streaming size   (GlRenderer downscales in GL)
         try {
             localRecorder = new LocalRecorder(context);
             hqSurface     = localRecorder.prepare(
@@ -127,7 +170,7 @@ public class HighFpsH264Media implements Media, CameraControl {
 
             streamingEncoder = new StreamingEncoder();
             lqSurface        = streamingEncoder.prepare(
-                    videoWidth, videoHeight,
+                    lqWidth, lqHeight,
                     currentFpsRange.getUpper(),
                     streamBitrateBps);
 
@@ -136,10 +179,18 @@ public class HighFpsH264Media implements Media, CameraControl {
             throw new RuntimeException(e);
         }
 
-        // Camera
+        // GlRenderer — sits between camera and both encoder surfaces.
+        // The camera session only sees ONE surface (the SurfaceTexture inside
+        // GlRenderer), which eliminates the "same surface type" crash.
+        glRenderer = new GlRenderer.Builder(videoWidth, videoHeight, lqWidth, lqHeight)
+                .scaleMode(GlRenderer.ScaleMode.CROP)
+                .contextLostCallback(this::onGlContextLost)
+                .build();
+        glRenderer.init(hqSurface, lqSurface);
+
+        // Camera — attach ONLY the GlRenderer's camera surface (one surface only)
         cameraController = new HighFPSCameraController(context);
-        cameraController.attachHQSurface(hqSurface);
-        cameraController.attachLQSurface(lqSurface);
+        cameraController.attachCameraSurface(glRenderer.getCameraSurface());
         cameraController.start(currentCameraId, currentSize, currentFpsRange.getUpper());
     }
 
@@ -157,6 +208,10 @@ public class HighFpsH264Media implements Media, CameraControl {
             localRecorder = null;
         }
 
+        // Release GlRenderer AFTER encoders are stopped (encoder surfaces must
+        // outlive the EGLSurfaces that wrap them)
+        if (glRenderer != null) { glRenderer.release(); glRenderer = null; }
+
         if (cameraController != null) { cameraController.stop(); cameraController = null; }
         if (webSocketHandler != null) { webSocketHandler.closeConnection(); webSocketHandler = null; }
 
@@ -165,7 +220,8 @@ public class HighFpsH264Media implements Media, CameraControl {
         basePtsUs = -1;
     }
 
-    // Media — streaming
+    // ── Media — streaming ─────────────────────────────────────────────────────
+
     @Override
     public short StartStream() {
         if (streamingEncoder == null) return -1;
@@ -184,8 +240,16 @@ public class HighFpsH264Media implements Media, CameraControl {
     }
 
     /**
-     * Changes resolution and FPS. Because HQ and LQ share one surface size,
-     * this always restarts both encoders and the camera session.
+     * Changes the streaming resolution and FPS.
+     *
+     * The requested (width, height) is used as the LQ streaming size directly;
+     * GlRenderer downscales the HQ camera feed to it via GL.
+     *
+     * The HQ hardware size is re-resolved from the high-speed API for the new
+     * FPS target — if it changes, the camera session and both encoders are fully
+     * restarted.  If the HQ size is unchanged only the streaming encoder and
+     * GlRenderer are rebuilt (camera keeps running).
+     *
      * Returns -1 if recording is active (stop recording first).
      */
     @Override
@@ -195,50 +259,28 @@ public class HighFpsH264Media implements Media, CameraControl {
             return -1;
         }
 
-        videoWidth  = width;
-        videoHeight = height;
-        videoFps    = fps;
-
-        if (streamingEncoder == null) return -3; // values stored for next init
-
-        boolean wasStreaming = drainRunning;
-        if (wasStreaming) {
-            stopDrainThread();
-            streamingEncoder.stop();
-        }
-        streamingEncoder.release();
-        streamingEncoder = null;
-
-        Size resolved = highSpeedCameraHelper.getBestHighSpeedSize(currentCameraId, videoWidth, videoHeight, videoFps);
+        // Resolve the HQ hardware size for the new FPS target
+        Size resolved = highSpeedCameraHelper.getBestHighSpeedSize(
+                currentCameraId, videoWidth, videoHeight, fps);
         if (resolved == null) {
             logger.log(TAG + ": SetStreamResolution — no suitable high-speed size");
             return -2;
         }
-        currentSize = resolved;
-        videoWidth  = resolved.getWidth();
-        videoHeight = resolved.getHeight();
 
-        currentFpsRange = highSpeedCameraHelper.getBestHighSpeedFpsRange(currentCameraId, currentSize, videoFps);
+        boolean hqChanged = !resolved.equals(currentSize) || fps != videoFps;
 
-        try {
-            streamingEncoder = new StreamingEncoder();
-            lqSurface        = streamingEncoder.prepare(
-                    videoWidth, videoHeight,
-                    currentFpsRange.getUpper(),
-                    streamBitrateBps);
-        } catch (IOException e) {
-            logger.log(TAG + ": SetStreamResolution re-prepare failed: " + Log.getStackTraceString(e));
-            return -4;
+        // Store new LQ streaming dimensions and fps
+        videoFps = fps;
+        lqWidth  = width;
+        lqHeight = height;
+
+        if (hqChanged) {
+            // Full pipeline restart (HQ hardware size or FPS changed)
+            return restartFullPipeline(resolved);
+        } else {
+            // LQ-only restart (HQ size unchanged — camera keeps running)
+            return restartLqOnly();
         }
-
-        cameraController.stop();
-        cameraController = new HighFPSCameraController(context);
-        cameraController.attachHQSurface(hqSurface);
-        cameraController.attachLQSurface(lqSurface);
-        cameraController.start(currentCameraId, currentSize, currentFpsRange.getUpper());
-
-        if (wasStreaming) StartStream();
-        return 0;
     }
 
     @Override
@@ -267,24 +309,47 @@ public class HighFpsH264Media implements Media, CameraControl {
         }
     }
 
-    // Media — recording
+    // ── Media — recording ─────────────────────────────────────────────────────
+
     @Override
     public short StartRecording() {
         if (localRecorder == null)             return -1;
-        if (localRecorder.isRecordingActive()) return 0; // already recording
+        if (localRecorder.isRecordingActive()) return 0;
         localRecorder.start();
         return 0;
     }
 
     /**
-     * HQ and LQ share one surface size — changing recording resolution also
-     * changes the stream resolution and restarts the camera session.
-     * Returns -1 if recording is active.
+     * Changes the recording (HQ) resolution.
+     *
+     * Allowed only when recording is not active — the MediaRecorder surface
+     * cannot be reconfigured mid-recording.  The full pipeline is restarted
+     * because the HQ encoder size is tied to the camera session size.
+     *
+     * Returns -1 if recording is currently active (call StopRecording first).
+     * Returns -2 if no suitable high-speed size is found for the request.
      */
     @Override
     public short SetRecordingResolution(int width, int height, int fps) {
-        logger.log(TAG + ": SetRecordingResolution — Recording Resolution same as Streaming");
-        return -1;
+        if (localRecorder != null && localRecorder.isRecordingActive()) {
+            logger.log(TAG + ": SetRecordingResolution — stop recording first");
+            return -1;
+        }
+
+        // Resolve the hardware size for the requested HQ dimensions + FPS
+        Size resolved = highSpeedCameraHelper.getBestHighSpeedSize(
+                currentCameraId, width, height, fps);
+        if (resolved == null) {
+            logger.log(TAG + ": SetRecordingResolution — no suitable high-speed size");
+            return -2;
+        }
+
+        videoFps    = fps;
+        videoWidth  = width;
+        videoHeight = height;
+
+        // Full pipeline restart — HQ encoder and camera session must be rebuilt
+        return restartFullPipeline(resolved);
     }
 
     @Override
@@ -309,7 +374,8 @@ public class HighFpsH264Media implements Media, CameraControl {
         }
     }
 
-    // Media — camera
+    // ── Media — camera ────────────────────────────────────────────────────────
+
     @Override
     public short SwitchCamera() {
         if (localRecorder != null && localRecorder.isRecordingActive()) {
@@ -330,29 +396,20 @@ public class HighFpsH264Media implements Media, CameraControl {
 
     @Override
     public short RotateCamera() {
-        // Implemented on host side
-        return 0;
+        return 0; // implemented on host side
     }
 
     @Override
     public short FlipCamera() {
-        // Implemented on host side
-        return 0;
+        return 0; // implemented on host side
     }
 
     @Override
     public JSONObject SupportedResolutions() {
-
         return highSpeedCameraHelper.SupportedResolutions(currentCameraId);
     }
 
-    // =========================================================================
-    // CameraControl
-    //
-    // The constrained high-speed session mandates CONTROL_AE_MODE_ON.
-    // Manual exposure and focus controls are not permitted by the Camera2 API
-    // in this mode and are logged + ignored.
-    // =========================================================================
+    // ── CameraControl — all no-ops / warnings in high-speed mode ─────────────
 
     @Override
     public void setExposureCompensation(int value) {
@@ -379,6 +436,151 @@ public class HighFpsH264Media implements Media, CameraControl {
     @Override public void enableAutoFocus() { /* always on — no-op */ }
 
     @Override public void apply() { /* no pending manual controls — no-op */ }
+
+    // ── Private — pipeline restart helpers ───────────────────────────────────
+
+    /**
+     * Full restart: new HQ size → camera session + both encoders + GlRenderer
+     * all torn down and rebuilt.
+     */
+    private short restartFullPipeline(Size newHqSize) {
+        boolean wasStreaming = drainRunning;
+        if (wasStreaming) { stopDrainThread(); streamingEncoder.stop(); }
+
+        // Tear down in reverse init order
+        if (glRenderer       != null) { glRenderer.release();       glRenderer       = null; }
+        if (cameraController != null) { cameraController.stop();    cameraController = null; }
+        if (streamingEncoder != null) { streamingEncoder.release(); streamingEncoder = null; }
+        if (localRecorder    != null) {
+            if (localRecorder.isRecordingActive()) localRecorder.stop();
+            localRecorder.release();
+            localRecorder = null;
+        }
+
+        currentSize = newHqSize;
+        videoWidth  = newHqSize.getWidth();
+        videoHeight = newHqSize.getHeight();
+        currentFpsRange = highSpeedCameraHelper.getBestHighSpeedFpsRange(
+                currentCameraId, currentSize, videoFps);
+
+        try {
+            localRecorder = new LocalRecorder(context);
+            hqSurface     = localRecorder.prepare(
+                    videoWidth, videoHeight,
+                    currentFpsRange.getUpper(),
+                    recordBitrateBps);
+
+            streamingEncoder = new StreamingEncoder();
+            lqSurface        = streamingEncoder.prepare(
+                    lqWidth, lqHeight,
+                    currentFpsRange.getUpper(),
+                    streamBitrateBps);
+        } catch (IOException e) {
+            logger.log(TAG + ": restartFullPipeline encoder prepare failed: "
+                    + Log.getStackTraceString(e));
+            return -4;
+        }
+
+        glRenderer = new GlRenderer.Builder(videoWidth, videoHeight, lqWidth, lqHeight)
+                .scaleMode(GlRenderer.ScaleMode.CROP)
+                .contextLostCallback(this::onGlContextLost)
+                .build();
+        glRenderer.init(hqSurface, lqSurface);
+
+        cameraController = new HighFPSCameraController(context);
+        cameraController.attachCameraSurface(glRenderer.getCameraSurface());
+        cameraController.start(currentCameraId, currentSize, currentFpsRange.getUpper());
+
+        if (wasStreaming) StartStream();
+        return 0;
+    }
+
+    /**
+     * LQ-only restart: HQ size unchanged → camera and recording encoder keep
+     * running.  Only the streaming encoder and GlRenderer LQ surface are
+     * rebuilt.
+     */
+    private short restartLqOnly() {
+        boolean wasStreaming = drainRunning;
+        if (wasStreaming) { stopDrainThread(); streamingEncoder.stop(); }
+
+        // Release old GL renderer and LQ encoder
+        if (glRenderer       != null) { glRenderer.release();       glRenderer       = null; }
+        if (streamingEncoder != null) { streamingEncoder.release(); streamingEncoder = null; }
+
+        try {
+            streamingEncoder = new StreamingEncoder();
+            lqSurface        = streamingEncoder.prepare(
+                    lqWidth, lqHeight,
+                    currentFpsRange.getUpper(),
+                    streamBitrateBps);
+        } catch (IOException e) {
+            logger.log(TAG + ": restartLqOnly encoder prepare failed: "
+                    + Log.getStackTraceString(e));
+            return -4;
+        }
+
+        // Rebuild GlRenderer with same HQ surface but new LQ surface/size.
+        // The camera session continues uninterrupted; we just swap what the
+        // GlRenderer renders into.
+        glRenderer = new GlRenderer.Builder(videoWidth, videoHeight, lqWidth, lqHeight)
+                .scaleMode(GlRenderer.ScaleMode.CROP)
+                .contextLostCallback(this::onGlContextLost)
+                .build();
+        glRenderer.init(hqSurface, lqSurface);
+
+        // Update the single surface the camera is targeting
+        cameraController.updateCameraSurface(glRenderer.getCameraSurface());
+
+        if (wasStreaming) StartStream();
+        return 0;
+    }
+
+    // ── Private — GlRenderer context-loss recovery ────────────────────────────
+
+    /**
+     * Called by GlRenderer (on a background thread) when the EGL context is
+     * lost due to screen-off, GPU reset, or encoder surface destruction.
+     *
+     * Recovery strategy:
+     *  1. Stop the drain thread (streaming encoder is no longer receiving frames).
+     *  2. Stop the camera session (it was writing to the now-dead SurfaceTexture).
+     *  3. Restart the full pipeline so a fresh EGL context is created.
+     *
+     * Recording state is preserved — if recording was active it will resume
+     * after the pipeline is back up.
+     */
+    private void onGlContextLost() {
+        Log.w(TAG, "GlRenderer context lost — restarting pipeline");
+
+        boolean wasStreaming  = drainRunning;
+        boolean wasRecording  = localRecorder != null && localRecorder.isRecordingActive();
+
+        // Stop streaming drain immediately
+        if (wasStreaming) stopDrainThread();
+
+        // Stop camera (it holds a reference to the dead SurfaceTexture)
+        if (cameraController != null) { cameraController.stop(); cameraController = null; }
+
+        // glRenderer has already torn itself down; just null the reference
+        glRenderer = null;
+
+        // Restart full pipeline
+        Size currentResolved = currentSize;
+        short result = restartFullPipeline(currentResolved);
+        if (result != 0) {
+            logger.log(TAG + ": onGlContextLost — pipeline restart failed: " + result);
+            return;
+        }
+
+        // Re-apply recording state
+        if (wasRecording && localRecorder != null) localRecorder.start();
+
+        // re-apply streaming state
+        if (wasStreaming) StartStream();
+    }
+
+    // ── Private — drain loop ──────────────────────────────────────────────────
 
     private void drainLoop() {
         while (drainRunning) {

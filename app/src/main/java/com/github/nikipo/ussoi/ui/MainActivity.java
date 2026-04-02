@@ -237,7 +237,7 @@ public class MainActivity extends AppCompatActivity {
             String url = urlIp.getText().toString().trim();
             if (!url.endsWith("/")) url += "/";
 
-            pref.edit().putString(KEY_url, url).putString(KEY_Device_Id,deviceName.getText().toString().trim()).putBoolean(KEY_BT_SWITCH, radioBt.isChecked()).putBoolean(KEY_USB_Switch, radioUsb.isChecked()).apply();
+            pref.edit().putString(KEY_url, url).putString(KEY_device_name,deviceName.getText().toString().trim()).putBoolean(KEY_BT_SWITCH, radioBt.isChecked()).putBoolean(KEY_USB_Switch, radioUsb.isChecked()).apply();
 
             // Handle Password Update securely
             String currentId = roomId.getText().toString().trim();
