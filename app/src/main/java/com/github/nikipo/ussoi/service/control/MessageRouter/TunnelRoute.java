@@ -2,6 +2,7 @@ package com.github.nikipo.ussoi.service.control.MessageRouter;
 
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_BT_SWITCH;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_USB_Switch;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.*;
 
 import android.bluetooth.BluetoothDevice;
 import android.content.Context;
@@ -65,12 +66,11 @@ public class TunnelRoute  {
             tunnels.add(UsbHandler.getInstance(ctx));
             Log.d(TAG, "Tunnel created: UsbHandler");
         } else {
-            // No-op tunnel placeholder so the list is never empty
             tunnels.add(new Tunnel() {
                 @Override public void init()               {}
                 @Override public void close()              {}
                 @Override public boolean isTunnelRunning() { return false; }
-                @Override public String getTunnelName()    { return ""; }
+                @Override public String getTunnelName()    { return EMPTY; }
             });
             Log.w(TAG, "No tunnel type selected in preferences");
         }
@@ -84,87 +84,49 @@ public class TunnelRoute  {
         }
     }
 
-    // ─── Command dispatcher ───────────────────────────────────────────────────
+    // TODO implement this
+    private void initUsbTunnels(Context ctx) {
+        for (BluetoothDevice bt : selectedBtDevices) {
+            BluetoothHandler handler = new BluetoothHandler(ctx);
+            handler.setDevice(bt);
+            tunnels.add(handler);
+        }
+    }
 
-    /**
-     * Routes an incoming tunnel command.
-     *
-     * start_tunnel / stop_tunnel expect: { ..., "tunnelName":"<name>" }
-     * get_tunnels  returns an ACK with the list of all tunnel names.
-     *
-     * ACK  : { "type":"ack",  "cmd":"<cmd>", "cmdId":"<uuid>" }
-     * NACK : { "type":"nack", "cmd":"<cmd>", "cmdId":"<uuid>", "error":"<reason>" }
-     * Data : { "type":"ack",  "cmd":"get_tunnels", "cmdId":"<uuid>",
-     *           "tunnels":["name1","name2",...] }
-     */
     public void route(JSONObject json) {
-        String cmd        = json.optString("cmd",        "");
-        String cmdId      = json.optString("cmdId",      "");
-        String tunnelName = json.optString("tunnelName", "");   // top-level field, not inside payload
-
+        String cmd        = json.optString(CMD,        EMPTY);
+        String cmdId      = json.optString(CMD_ID,      EMPTY);
+        String tunnelName = json.optString(TUNNEL_NAME, EMPTY);
         try {
             switch (cmd) {
-
-                case "start_tunnel": {
+                case START_TUNNEL: {
                     if (startTunnel(tunnelName)) {
-                        router.sendAck(connectionManager, cmdId, cmd);
+                        router.sendResponse(connectionManager, cmd,cmdId,null );
                     } else {
-                        router.sendNack(connectionManager, cmdId, cmd,
-                                "Tunnel '" + tunnelName + "' not found or failed to start");
+                        router.sendError(connectionManager, cmdId, cmd,"Tunnel '" + tunnelName + "' not found");
                     }
                     break;
                 }
-
-                case "stop_tunnel": {
+                case STOP_TUNNEL: {
                     if (stopTunnel(tunnelName)) {
-                        router.sendAck(connectionManager, cmdId, cmd);
+                        router.sendResponse(connectionManager, cmd,cmdId, null);
                     } else {
-                        router.sendNack(connectionManager, cmdId, cmd,
-                                "Tunnel '" + tunnelName + "' not found or failed to stop");
+                        router.sendError(connectionManager, cmdId, cmd,"Tunnel '" + tunnelName + "' not found");
                     }
-                    break;
-                }
-
-                case "get_tunnels": {
-                    // Build array of tunnel names
-                    JSONArray tunnelsArray = new JSONArray();
-                    for (Tunnel t : tunnels) {
-                        if (t != null) {
-                            String name = t.getTunnelName();
-                            if (name != null && !name.isEmpty()) {
-                                tunnelsArray.put(name);
-                            }
-                        }
-                    }
-
-                    // ACK format expected by server's processGetTunnels handler:
-                    // { "type":"ack", "cmd":"get_tunnels", "cmdId":"...", "tunnels":["t1","t2"] }
-                    JSONObject res = new JSONObject();
-                    res.put("type",    "ack");
-                    res.put("cmd",     "get_tunnels");
-                    res.put("cmdId",   cmdId);
-                    res.put("tunnels", tunnelsArray);
-                    connectionManager.send(res);
                     break;
                 }
 
                 default:
-                    router.sendNack(connectionManager, cmdId, cmd, "Unknown tunnel command: " + cmd);
+                    router.sendError(connectionManager, cmdId, cmd, "Unknown tunnel command: " + cmd);
                     break;
             }
 
         } catch (Exception e) {
-            router.sendNack(connectionManager, cmdId, cmd, "Internal error: " + e.getMessage());
+            // LOG TODO
             e.printStackTrace();
         }
     }
 
-    // ─── Tunnel lookup ────────────────────────────────────────────────────────
-
-    /**
-     * Finds a tunnel by its name string (matching getTunnelName()).
-     * Returns null if no match is found.
-     */
     private Tunnel findTunnel(String name) {
         if (name == null || name.isEmpty()) return null;
         for (Tunnel t : tunnels) {
@@ -177,9 +139,13 @@ public class TunnelRoute  {
         Tunnel t = findTunnel(tunnelName);
         if (t == null) return false;
         try {
-            t.init();
+            // only init tunnel if not running
+            if(!t.isTunnelRunning()){
+                t.init();
+            }
             return true;
         } catch (Exception e) {
+            e.printStackTrace();
             Log.e(TAG, "startTunnel failed: " + tunnelName, e);
             return false;
         }
@@ -197,21 +163,38 @@ public class TunnelRoute  {
         }
     }
 
-    // ─── Status / lifecycle ───────────────────────────────────────────────────
+    public JSONObject getTunnels() {
+        JSONObject root = new JSONObject();
+        JSONArray tunnelsArray = new JSONArray();
 
-    /**
-     * Returns true if at least one tunnel in the list is currently running.
-     */
+        for (Tunnel t : tunnels) {
+            if (t == null) continue;
+
+            String name = t.getTunnelName();
+            if (name == null || name.isEmpty()) continue;
+
+            tunnelsArray.put(name);
+        }
+
+        try {
+            root.put("tunnels", tunnelsArray);
+        }
+        catch (Exception e){
+            e.printStackTrace();
+            return null;
+        }
+        return root;
+    }
+
     public boolean isTunnelRunning() {
+        // todo for now only return tunnel 0 status
         for (Tunnel t : tunnels) {
             if (t != null && t.isTunnelRunning()) return true;
         }
         return false;
     }
 
-    /**
-     * Closes all active tunnels (called on service shutdown).
-     */
+
     public void stopTunnel() {
         for (Tunnel t : tunnels) {
             try {

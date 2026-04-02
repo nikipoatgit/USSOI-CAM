@@ -63,7 +63,7 @@ import java.nio.ByteBuffer;
  */
 public class HighFpsH264Media implements Media, CameraControl {
 
-    private static final String TAG         = "HighFpsH246Media";
+    private static final String TAG = "HighFpsH246Media";
     private static final int    HEADER_SIZE = 1 + 8; // keyFrame flag + 8-byte PTS
 
     private Context               context;
@@ -82,8 +82,8 @@ public class HighFpsH264Media implements Media, CameraControl {
     private int videoFps         = 60;
     private int lqWidth          = 1280;   // LQ streaming width  (matches HQ at init)
     private int lqHeight         = 720;    // LQ streaming height (matches HQ at init)
-    private int streamBitrateBps = 500_000;    //  500 kbps streaming
-    private int recordBitrateBps = 5_000_000;  // 5000 kbps recording
+    private int streamBitrateBps = 500_000;    //  0.5 Mbps streaming
+    private int recordBitrateBps = 5_000_000;  // 5 Mbps recording
 
     private Size           currentSize;
     private Range<Integer> currentFpsRange;
@@ -119,7 +119,7 @@ public class HighFpsH264Media implements Media, CameraControl {
 
         // Select a high-speed capable camera
         currentCameraId = highSpeedCameraHelper.cycleCameraId(currentCameraId);
-        if (currentCameraId == null) {
+        if (currentCameraId == null ) {
             logger.log(TAG + ": no high-speed camera available");
             return;
         }
@@ -185,7 +185,7 @@ public class HighFpsH264Media implements Media, CameraControl {
         glRenderer = new GlRenderer.Builder(videoWidth, videoHeight, lqWidth, lqHeight)
                 .scaleMode(GlRenderer.ScaleMode.CROP)
                 .contextLostCallback(this::onGlContextLost)
-                .build();
+                .build(context);
         glRenderer.init(hqSurface, lqSurface);
 
         // Camera — attach ONLY the GlRenderer's camera surface (one surface only)
@@ -385,7 +385,7 @@ public class HighFpsH264Media implements Media, CameraControl {
         if (highSpeedCameraHelper == null) return -2;
 
         boolean wasStreaming = drainRunning;
-        if (wasStreaming) { stopDrainThread(); streamingEncoder.stop(); }
+        if (wasStreaming) { stopDrainThread(); if (streamingEncoder != null) streamingEncoder.stop(); }
         if (cameraController != null) cameraController.stop();
 
         highSpeedCameraHelper.invalidateCameraCache();
@@ -484,14 +484,13 @@ public class HighFpsH264Media implements Media, CameraControl {
         glRenderer = new GlRenderer.Builder(videoWidth, videoHeight, lqWidth, lqHeight)
                 .scaleMode(GlRenderer.ScaleMode.CROP)
                 .contextLostCallback(this::onGlContextLost)
-                .build();
+                .build(context);
         glRenderer.init(hqSurface, lqSurface);
 
         cameraController = new HighFPSCameraController(context);
         cameraController.attachCameraSurface(glRenderer.getCameraSurface());
         cameraController.start(currentCameraId, currentSize, currentFpsRange.getUpper());
 
-        if (wasStreaming) StartStream();
         return 0;
     }
 
@@ -526,7 +525,7 @@ public class HighFpsH264Media implements Media, CameraControl {
         glRenderer = new GlRenderer.Builder(videoWidth, videoHeight, lqWidth, lqHeight)
                 .scaleMode(GlRenderer.ScaleMode.CROP)
                 .contextLostCallback(this::onGlContextLost)
-                .build();
+                .build(context);
         glRenderer.init(hqSurface, lqSurface);
 
         // Update the single surface the camera is targeting

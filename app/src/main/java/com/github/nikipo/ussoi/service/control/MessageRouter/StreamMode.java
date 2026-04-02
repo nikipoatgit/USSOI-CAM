@@ -1,5 +1,10 @@
 package com.github.nikipo.ussoi.service.control.MessageRouter;
 
+import static com.github.nikipo.ussoi.ui.UssoiStrings.STREAM_H264;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.STREAM_HFH264;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.STREAM_NONE;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.STREAM_WEBRTC;
+
 /**
  * *****************************************************************************
  *
@@ -23,14 +28,13 @@ public enum StreamMode {
     None;
 
     public static StreamMode fromString(String value) {
-        if (value == null) return None;
-
-        switch (value.toLowerCase()) {
-            case "webrtc": return WebRtc;
-            case "h264": return H264;
-            case "hfh264": return HFH264;
-            case "none": return None;
-            default: return null;
+        if (value == null) return null;
+        switch (value) {
+            case STREAM_WEBRTC: return WebRtc;
+            case STREAM_H264: return H264;
+            case STREAM_HFH264: return HFH264;
+            case STREAM_NONE: return None;
+            default : return null;
         }
     }
 }

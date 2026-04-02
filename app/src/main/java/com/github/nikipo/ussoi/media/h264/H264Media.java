@@ -2,6 +2,7 @@ package com.github.nikipo.ussoi.media.h264;
 
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Session_KEY;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_stream_api_path;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.EMPTY;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -128,7 +129,7 @@ public class H264Media implements Media, CameraControl {
             public void onError(String e) {
             }
         });
-        webSocketHandler.setupConnection(KEY_stream_api_path,preferences.getString(KEY_Session_KEY,"123"));
+        webSocketHandler.setupConnection(KEY_stream_api_path,preferences.getString(KEY_Session_KEY,EMPTY));
 
         // Set up Encoders
         try {
@@ -147,8 +148,8 @@ public class H264Media implements Media, CameraControl {
                     streamBitratebps);
 
         } catch (IOException e) {
-            logger.log(TAG + " Encoder prepare failed: " + Log.getStackTraceString(e));
-            throw new RuntimeException(e);
+            // TODO LOG
+            e.printStackTrace();
         }
 
         // Attach surfaces to CameraController & start camera
@@ -195,17 +196,13 @@ public class H264Media implements Media, CameraControl {
     @Override
     public short StartStream() {
         if (streamingEncoder == null) return -1;
-        if (drainRunning)            return 0; // already streaming
+        if (drainRunning)            return -2; // already streaming
 
         // Start encoder
         streamingEncoder.start();
 
         // Resume camera feed to LQ surface
         cameraController.resumeStreaming();
-
-        // Connect WebSocket
-        // this method is private
-        // webSocketHandler.connect();
 
         // Start drain thread — pulls encoded frames and sends over WS
         drainRunning = true;

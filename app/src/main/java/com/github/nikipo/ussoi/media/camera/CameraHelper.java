@@ -365,56 +365,95 @@ public class CameraHelper {
         }
     }
 
-    public static JSONObject buildResolutionJson(
-            String cameraId,
-            Size[] sizes,
-            boolean highSpeed,
-            StreamConfigurationMap map,
-            CameraCharacteristics characteristics
-    ) throws Exception {
+    public static JSONObject buildAllCamerasJson(CameraManager cameraManager) throws Exception {
 
         JSONObject root = new JSONObject();
-        root.put("cameraId", cameraId);
-        root.put("type", highSpeed ? "high_speed" : "normal");
+        JSONArray camerasArray = new JSONArray();
 
-        JSONArray resArray = new JSONArray();
+        for (String cameraId : cameraManager.getCameraIdList()) {
 
+            CameraCharacteristics characteristics =
+                    cameraManager.getCameraCharacteristics(cameraId);
 
-        for (Size s : sizes) {
-            JSONObject resObj = new JSONObject();
-            resObj.put("width", s.getWidth());
-            resObj.put("height", s.getHeight());
+            StreamConfigurationMap map =
+                    characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
 
-            JSONArray fpsArray = new JSONArray();
+            if (map == null) continue;
 
-            if (highSpeed) {
-                Range<Integer>[] ranges = map.getHighSpeedVideoFpsRangesFor(s);
-                if (ranges != null) {
-                    for (Range<Integer> r : ranges) {
-                        JSONObject fps = new JSONObject();
-                        fps.put("min", r.getLower());
-                        fps.put("max", r.getUpper());
-                        fpsArray.put(fps);
+            // Normal sizes (example: SurfaceTexture)
+            Size[] normalSizes = map.getOutputSizes(SurfaceTexture.class);
+
+            // High-speed sizes
+            Size[] highSpeedSizes = map.getHighSpeedVideoSizes();
+
+            JSONObject camObj = new JSONObject();
+            camObj.put("cameraId", cameraId);
+
+            // ---------- NORMAL ----------
+            JSONArray normalArray = new JSONArray();
+
+            Range<Integer>[] normalRanges =
+                    characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+
+            if (normalSizes != null) {
+                for (Size s : normalSizes) {
+                    JSONObject resObj = new JSONObject();
+                    resObj.put("width", s.getWidth());
+                    resObj.put("height", s.getHeight());
+
+                    JSONArray fpsArray = new JSONArray();
+
+                    if (normalRanges != null) {
+                        for (Range<Integer> r : normalRanges) {
+                            JSONObject fps = new JSONObject();
+                            fps.put("min", r.getLower());
+                            fps.put("max", r.getUpper());
+                            fpsArray.put(fps);
+                        }
                     }
-                }
-            } else {
-                Range<Integer>[] ranges = characteristics .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
 
-                if (ranges != null) {
-                    for (Range<Integer> r : ranges) {
-                        JSONObject fps = new JSONObject();
-                        fps.put("min", r.getLower());
-                        fps.put("max", r.getUpper());
-                        fpsArray.put(fps);
-                    }
+                    resObj.put("fpsRanges", fpsArray);
+                    normalArray.put(resObj);
                 }
             }
 
-            resObj.put("fpsRanges", fpsArray);
-            resArray.put(resObj);
+            // ---------- HIGH SPEED ----------
+            JSONArray highSpeedArray = new JSONArray();
+
+            if (highSpeedSizes != null) {
+                for (Size s : highSpeedSizes) {
+                    JSONObject resObj = new JSONObject();
+                    resObj.put("width", s.getWidth());
+                    resObj.put("height", s.getHeight());
+
+                    JSONArray fpsArray = new JSONArray();
+
+                    Range<Integer>[] ranges = map.getHighSpeedVideoFpsRangesFor(s);
+
+                    if (ranges != null) {
+                        for (Range<Integer> r : ranges) {
+                            JSONObject fps = new JSONObject();
+                            fps.put("min", r.getLower());
+                            fps.put("max", r.getUpper());
+                            fpsArray.put(fps);
+                        }
+                    }
+
+                    resObj.put("fpsRanges", fpsArray);
+                    highSpeedArray.put(resObj);
+                }
+            }
+
+            camObj.put("normal", normalArray);
+            camObj.put("high_speed", highSpeedArray);
+
+            camerasArray.put(camObj);
         }
 
-        root.put("resolutions", resArray);
+        root.put("cameras", camerasArray);
         return root;
     }
+
+
+
 }
