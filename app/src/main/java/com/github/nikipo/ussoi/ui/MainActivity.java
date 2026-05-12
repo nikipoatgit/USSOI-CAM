@@ -72,6 +72,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean keepScreenOn = false;
     private MaterialButton btnKeepScreenOn;
 
+    private boolean initFlag = true;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -79,10 +80,10 @@ public class MainActivity extends AppCompatActivity {
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
 
-        //get storage instances
+        logging = Logging.getInstance(this);
         saveInputFields = SaveInputFields.getInstance(this);
         pref = saveInputFields.get_shared_pref();
-        logging = Logging.getInstance(this);
+
 
         powerController = new PowerController(this);
 
@@ -106,12 +107,6 @@ public class MainActivity extends AppCompatActivity {
 
         // Storage Folder Permission Check ,Dialog for folder selection
         storageController = new StorageController(this, saveInputFields, pickLogFolderLauncher);
-        if (!storageController.init()) {
-            Toast.makeText(this, "Storage initiation failed", Toast.LENGTH_LONG).show();
-             logging.log( TAG + ": "   + "Storage initiation failed");
-            this.finishAffinity();
-            return;
-        }
 
          logging.log( TAG + ": "   + "Main Activity Created");
 
@@ -154,6 +149,23 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        StorageController.InitState state = storageController.init();
+
+        switch (state) {
+
+            case OK:
+                break;
+
+            case NEED_FOLDER:
+            case PERMISSION_REVOKED:
+                storageController.requestFolder();
+                break;
+
+            case ERROR:
+                Toast.makeText(this, "Storage error", Toast.LENGTH_LONG).show();
+                finishAffinity();
+                break;
+        }
     }
 
     @Override

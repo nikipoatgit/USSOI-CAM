@@ -2,8 +2,6 @@ package com.github.nikipo.ussoi.media;
 
 import android.content.Context;
 
-import org.json.JSONObject;
-
 /**
  * *****************************************************************************
  *
@@ -21,10 +19,16 @@ import org.json.JSONObject;
  * *****************************************************************************
  */
 public interface Media {
-    void init(Context ctx);
-    void stop();
+    // todo implement close
 
-    // Stream methods
+    // sets up context and initial variable
+    void init(Context ctx);
+
+    //tears down every thing
+    void stopStream();
+
+
+    // creates every thing form factory
     short StartStream();
     short SetStreamResolution(int width, int height, int fps);
     short SetStreamBitrate(int bitrate);
@@ -39,9 +43,8 @@ public interface Media {
     void StopRecording();
 
     // utility
-    short SwitchCamera();
+    short SwitchCamera(int camId);
     short RotateCamera();
     short FlipCamera();
-    JSONObject SupportedResolutions();
 }
 

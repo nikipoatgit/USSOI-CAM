@@ -99,7 +99,7 @@ public class UsbHandler implements Tunnel {
 
         // Closing order matters: WebSocket before port
         if (webSocketHandler != null) {
-            webSocketHandler.closeConnection();
+            webSocketHandler.close();
             webSocketHandler = null;
             Log.d(TAG, "Socket closed");
         }
@@ -255,7 +255,7 @@ public class UsbHandler implements Tunnel {
                     if (port == null) break;
                     int len = port.read(buffer, READ_WAIT_MILLIS);
                     if (len > 0) {
-                        webSocketHandler.connSendPayloadBytes(Arrays.copyOf(buffer, len));
+                        webSocketHandler.sendBytes(Arrays.copyOf(buffer, len));
                     }
                 } catch (IOException e) {
                     logging.log(TAG + " Error reading from USB port: " + e);

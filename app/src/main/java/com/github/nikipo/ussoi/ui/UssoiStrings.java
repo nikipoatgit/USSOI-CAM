@@ -74,7 +74,8 @@ public class UssoiStrings {
     public static final String MUTE         = "mute";
     public static final String FLIP         = "flip";
 
-    public static final String WEBRTC_OFFER = "webrtc_offer";
+
+    public static final String WEBRTC_SDP = "webrtc_sdp";
     public static final String WEBRTC_ICE   = "webrtc_ice";
 
     // Cache / Query Commands
@@ -100,5 +101,12 @@ public class UssoiStrings {
     public static final String STATS = "stats";
     public static final String IDENTITY = "identity";
     public static final String TELEMETRY_RATE = "Telemetry_Rate";
+    public static final String PARAM = "param";
+    public static final String CAM_ID = "camId";
+    public static final String HEIGHT = "height";
+    public static final String WIDTH = "width";
+    public static final String FPS = "fps";
+    public static final String BITRATE = "bitrate";
+    public static final String RES = "res";
 
 }

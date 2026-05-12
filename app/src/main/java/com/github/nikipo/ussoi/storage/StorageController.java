@@ -16,6 +16,14 @@ import java.util.List;
 
 public final class StorageController {
     private static final String TAG = "StorageController";
+
+    public enum InitState {
+        OK,
+        NEED_FOLDER,
+        PERMISSION_REVOKED,
+        ERROR
+    }
+
     private final Activity activity;
     private final SaveInputFields saveInputFields;
     private Logging logging;
@@ -35,39 +43,38 @@ public final class StorageController {
     }
 
 
-    public boolean init() {
+    public InitState init() {
         if (pref == null) {
-            logging.log(TAG + "prefs was null");
-            return false;
+            logging.log(TAG + " prefs null");
+            return InitState.ERROR;
         }
+
         String uriStr = pref.getString(SaveInputFields.PREF_LOG_URI, null);
 
-        // check prefs if Uri was earlier saved
         if (uriStr == null) {
-            logging.log(TAG + "uriStr was null , Selecting Folder");
-            showLogFolderNote();
-            return false;
+            logging.log(TAG + " uri null");
+            return InitState.NEED_FOLDER;
         }
 
         Uri treeUri = Uri.parse(uriStr);
 
-        // if permission was revoked initiate one
         if (!hasPersistedPermission(treeUri)) {
-            logging.log(TAG + "Permission was revoked trying again");
+            logging.log(TAG + " permission revoked");
             pref.edit().remove(SaveInputFields.PREF_LOG_URI).apply();
-            showLogFolderNote();
-            return false;
+            return InitState.PERMISSION_REVOKED;
         }
 
-        // create subfolder in not exist
         try {
             createUssoiFolders(treeUri);
         } catch (Exception e) {
             pref.edit().remove(SaveInputFields.PREF_LOG_URI).apply();
-            showLogFolderNote();
+            logging.log(TAG + " folder creation failed");
+            return InitState.ERROR;
         }
-        return true;
+
+        return InitState.OK;
     }
+
 
 
     private boolean hasPersistedPermission(Uri uri) {
@@ -132,4 +139,8 @@ public final class StorageController {
         createUssoiFolders(treeUri);
     }
 
+
+    public void requestFolder() {
+        showLogFolderNote();
+    }
 }

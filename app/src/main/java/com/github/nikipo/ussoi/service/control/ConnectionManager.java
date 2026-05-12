@@ -120,7 +120,7 @@ public class ConnectionManager {
         }
 
         if (webSocketHandler != null) {
-            webSocketHandler.closeConnection();
+            webSocketHandler.close();
             webSocketHandler = null;
         }
 

@@ -1,7 +1,5 @@
 package com.github.nikipo.ussoi.media.camera;
 
-import static com.github.nikipo.ussoi.media.camera.CameraHelper.buildResolutionJson;
-
 import android.content.Context;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
@@ -276,22 +274,5 @@ public class HighSpeedCameraHelper {
             }
         } catch (Exception ignored) {}
         return false;
-    }
-
-    public JSONObject SupportedResolutions(String cameraId) {
-        try {
-            Size[] sizes = getHighSpeedSizes(cameraId);
-            if (sizes == null) return new JSONObject();
-
-            CameraCharacteristics chars = getCameraCharacteristics(cameraId);
-            StreamConfigurationMap map  = chars.get(
-                    CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-
-            return buildResolutionJson(cameraId, sizes, true, map, chars);
-
-        } catch (Exception e) {
-            Log.e(TAG, "SupportedResolutions failed", e);
-            return new JSONObject();
-        }
     }
 }
