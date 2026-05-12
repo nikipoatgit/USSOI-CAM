@@ -1,6 +1,7 @@
 package com.github.nikipo.ussoi.media.webrtc;
 
 import android.content.Context;
+import android.hardware.camera2.CameraAccessException;
 import android.util.Log;
 import android.util.Range;
 import android.util.Size;
@@ -89,23 +90,26 @@ public final class WebRtcCameraSource {
     public synchronized void start(VideoSource videoSource,
                                    SurfaceTextureHelper surfaceTextureHelper) {
         // Select first available camera
-        currentCameraId = cameraHelper.cycleCameraId(null);
         if (currentCameraId == null) {
-            Log.e(TAG, "No camera available");
-            return;
+            try {
+                currentCameraId = cameraHelper.getCameraIdList()[0];
+            } catch (CameraAccessException e) {
+                e.printStackTrace();
+                Log.e(TAG, "camera selection exception");
+                return;
+            }
         }
 
         // Resolve best supported size
-        Size resolved = cameraHelper.getHardwareSupportedResolution(
-                currentCameraId, videoWidth, videoHeight);
-        if (resolved != null) {
-            videoWidth  = resolved.getWidth();
-            videoHeight = resolved.getHeight();
-        }
+//        Size resolved = cameraHelper.getHardwareSupportedResolution(
+//                currentCameraId, videoWidth, videoHeight);
+//        if (resolved != null) {
+//            videoWidth  = resolved.getWidth();
+//            videoHeight = resolved.getHeight();
+//        }
 
         // Resolve best FPS range
-        Range<Integer> fpsRange = cameraHelper.getOptimalFpsRange(
-                currentCameraId, videoWidth, videoHeight, videoFps);
+        Range<Integer> fpsRange = cameraHelper.getOptimalFpsRange(  currentCameraId, videoFps);
         videoFps = fpsRange.getUpper();
 
         Log.d(TAG, "Camera source config: " + videoWidth + "x" + videoHeight + " @" + videoFps);
@@ -149,8 +153,6 @@ public final class WebRtcCameraSource {
         }
         if (capturer == null) return false;
 
-        cameraHelper.invalidateCameraCache();
-        currentCameraId = cameraHelper.cycleCameraId(currentCameraId);
         capturer.switchCamera(null); // WebRTC handles the Camera2 re-open internally
         Log.d(TAG, "Switched to camera: " + currentCameraId);
         return true;
@@ -173,15 +175,14 @@ public final class WebRtcCameraSource {
         }
         if (capturer == null) return false;
 
-        Size resolved = cameraHelper.getHardwareSupportedResolution(
-                currentCameraId, width, height);
-        if (resolved != null) {
-            width  = resolved.getWidth();
-            height = resolved.getHeight();
-        }
+//        Size resolved = cameraHelper.getHardwareSupportedResolution(
+//                currentCameraId, width, height);
+//        if (resolved != null) {
+//            width  = resolved.getWidth();
+//            height = resolved.getHeight();
+//        }
 
-        Range<Integer> fpsRange = cameraHelper.getOptimalFpsRange(
-                currentCameraId, width, height, fps);
+        Range<Integer> fpsRange = cameraHelper.getOptimalFpsRange( currentCameraId, fps);
         fps = fpsRange.getUpper();
 
         videoWidth  = width;

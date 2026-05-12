@@ -69,7 +69,7 @@ public class BluetoothHandler implements Tunnel {
         }
 
         if (webSocketHandler != null) {
-            webSocketHandler.closeConnection();
+            webSocketHandler.close();
             webSocketHandler = null;
         }
     }
@@ -157,7 +157,7 @@ public class BluetoothHandler implements Tunnel {
 
             @Override
             public void onReceived(String data, byte[] byteData) {
-                webSocketHandler.connSendPayloadBytes(byteData);
+                webSocketHandler.sendBytes(byteData);
             }
         });
     }

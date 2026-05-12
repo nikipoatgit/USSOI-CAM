@@ -201,7 +201,7 @@ public class WebSocketHandler {
         }
     }
 
-    public void connSendPayloadBytes(byte[] serialBytesReceived) {
+    public void sendBytes(byte[] serialBytesReceived) {
         if (webSocket != null && isConnected) {
             try {
                 webSocket.send(ByteString.of(serialBytesReceived));
@@ -213,7 +213,7 @@ public class WebSocketHandler {
         }
     }
 
-    public void closeConnection() {
+    public void close() {
         isManualClose = true;
         if (webSocket != null) {
             webSocket.close(1000, "Closing manually");

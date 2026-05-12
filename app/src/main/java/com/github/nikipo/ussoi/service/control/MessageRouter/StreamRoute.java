@@ -2,7 +2,7 @@ package com.github.nikipo.ussoi.service.control.MessageRouter;
 
 import static com.github.nikipo.ussoi.ui.UssoiStrings.*;
 
-import android.content.Context;
+import android.content.Context;import android.util.Log;
 
 import com.github.nikipo.ussoi.media.HFH264.HighFpsH264Media;
 import com.github.nikipo.ussoi.media.Media;
@@ -61,7 +61,7 @@ public class StreamRoute  {
             default:
                 media = new Media() {
                     @Override public void init(Context ctx) {}
-                    @Override public void stop() {}
+                    @Override public void stopStream() {}
                     @Override public short StartStream()                              { return 0; }
                     @Override public short SetStreamResolution(int w, int h, int f)  { return 0; }
                     @Override public short SetStreamBitrate(int b)                   { return 0; }
@@ -72,19 +72,19 @@ public class StreamRoute  {
                     @Override public short SetRecordingBitrate(int b)                { return 0; }
                     @Override public boolean IsRecording()                            { return false; }
                     @Override public void StopRecording()                             {}
-                    @Override public short SwitchCamera()                             { return 0; }
+                    @Override public short SwitchCamera(int camId)                             { return 0; }
                     @Override public short RotateCamera()                             { return 0; }
                     @Override public short FlipCamera()                               { return 0; }
-                    @Override public JSONObject SupportedResolutions()                { return null; }
                 };
                 break;
         }
     }
 
-    public void stopStream()    { media.stop(); }
+    public void stopStream()    { media.stopStream(); }
     public boolean isStreaming()  { return media.IsStreaming(); }
     public boolean isRecording()  { return media.IsRecording(); }
 
+    // TODO use string maro to all lister sentences
     public void route(JSONObject json) {
         String cmd   = json.optString("cmd", "");
         String cmdId = json.optString("cmdId", "");
@@ -96,8 +96,12 @@ public class StreamRoute  {
                     short r = media.StartStream();
 
                     if (r == 0) router.sendResponse(connectionManager, cmdId, cmd,null);
-                    else if (r == -1) router.sendError(connectionManager, cmdId, cmd, "Stream Encoder Null");
+                    else if (r == -1) router.sendError(connectionManager, cmdId, cmd, "Stream Encoder / peer connection Null");
                     else if (r == -2) router.sendError(connectionManager, cmdId, cmd, "Stream Already Running");
+                    else if (r == -3) router.sendError(connectionManager, cmdId, cmd, "Stream Resolution Not Set");
+                    else if (r == -4) router.sendError(connectionManager, cmdId, cmd, "Initialization Failed");
+                    else if (r == -5) router.sendError(connectionManager, cmdId, cmd, "Stream And Record Resolution Required");
+
 
                     break;
                 }
@@ -107,42 +111,174 @@ public class StreamRoute  {
                         router.sendError(connectionManager, cmdId, cmd, "Recording Active");
                        break;
                     }
-                    media.stop();
+                    media.stopStream();
                     router.sendResponse(connectionManager, cmdId, cmd,null);
                     break;
                 }
 
-                case "start_recording": {
+                case START_RECORDING: {
                     short r = media.StartRecording();
-                    if (r == 0) router.sendResponse(connectionManager, cmdId, cmd);
-                    else        router.sendError(connectionManager, cmdId, cmd, "Start recording failed: " + r);
+                    if (r == 0) router.sendResponse(connectionManager, cmd, cmdId,null);
+                    else if (r == -1) router.sendError(connectionManager, cmdId, cmd, "Local Encoder Null");
+                    else if (r == -2) router.sendError(connectionManager, cmdId, cmd, "Recording Already Running");
                     break;
                 }
 
-                case "stop_recording": {
+                case STOP_RECORDING: {
                     media.StopRecording();
-                    router.sendResponse(connectionManager, cmdId, cmd);
+                    router.sendResponse(connectionManager, cmd,cmdId,null);
                     break;
                 }
 
-                // ── Playback controls ─────────────────────────────────────────
+                case SWITCH: {
+                    JSONObject param = json.optJSONObject(PARAM);
+                    if (param == null) break;
+
+                    short r = media.SwitchCamera(param.optInt(CAM_ID,0));
+                    if (r == 0) router.sendResponse(connectionManager, cmd,cmdId,null);
+                    else if (r == -1) router.sendError(connectionManager, cmdId, cmd, "Recording Active");
+                    else if (r == -2) router.sendError(connectionManager, cmdId, cmd, "Internal Error");
+                    break;
+                }
+
+                case SET_RECORD_RES: {
+                    JSONObject param = json.optJSONObject(PARAM);
+                    if (param == null)  break;
+
+                    if (param.has(RES)) {
+                        JSONObject res = param.optJSONObject(RES);
+                        if (res == null)  break;
+
+                        int width  = res.optInt(WIDTH,  -1);
+                        int height = res.optInt(HEIGHT, -1);
+                        int fps    = res.optInt(FPS,    -1);
+
+                        if (width < 1 || height < 1 || fps < 1) {
+                            router.sendError(connectionManager, cmdId, cmd, "Invalid Resolution");
+                            break;
+                        }
+                        if (media.SetRecordingResolution(width, height, fps) != 0) {
+                            // todo implement fix res / fps login rather than dynamic
+                            router.sendError(connectionManager, cmdId, cmd, "Resolution Unavailable");
+                        }
+                        else router.sendResponse(connectionManager,cmd,cmdId,null);
+                    }
+                    else if (param.has(BITRATE)) {
+                        int bitrate = param.optInt(BITRATE, -1);
+                        if (bitrate < 100) {
+                            router.sendError(connectionManager, cmdId, cmd, "Invalid Record Bitrate");
+                            break;
+                        }
+                        short r = media.SetRecordingBitrate(bitrate);
+                        if (r == -4) router.sendError(connectionManager, cmdId, cmd, "Initialization Failed");
+                        else router.sendResponse(connectionManager,cmd,cmdId,null);
+                    }
+                    break;
+                }
+
+                case SET_STREAM_RES: {
+                    JSONObject param = json.optJSONObject(PARAM);
+                    if (param == null)  break;
+
+                    if (param.has(RES)) {
+                        JSONObject res = param.optJSONObject(RES);
+                        if (res == null)  break;
+
+                        int width  = res.optInt(WIDTH,  -1);
+                        int height = res.optInt(HEIGHT, -1);
+                        int fps    = res.optInt(FPS,    -1);
+
+                        Log.d(TAG,"SetRecordingResolution width :"+width+" height :"+height+" fps :"+fps);
+
+                        if (width < 1 || height < 1 || fps < 1) {
+                            router.sendError(connectionManager, cmdId, cmd, "Invalid Resolution");
+                            break;
+                        }
+
+                        short r = media.SetStreamResolution(width, height, fps);
+                        // todo implement fix res / fps login rather than dynamic
+                        if (r == -4) router.sendError(connectionManager, cmdId, cmd, "Initialization Failed");
+                        else if (r == -3) router.sendError(connectionManager, cmdId, cmd, "Resolution Unavailable");
+                        else if (r == -1) router.sendError(connectionManager, cmdId, cmd, "Recording Active");
+                        else if (r == -2) router.sendError(connectionManager, cmdId, cmd, "Stream Encoder null");
+                        else  router.sendResponse(connectionManager,cmd,cmdId,null);
+                        break;
+                    }
+
+                    else if (param.has(BITRATE)) {
+                        int bitrate = param.optInt(BITRATE, -1);
+                        if (bitrate < 100) {
+                            router.sendError(connectionManager, cmdId, cmd, "Invalid Stream Bitrate");
+                            break;
+                        }
+                        short r = media.SetStreamBitrate(bitrate);
+                        if (r == -4) router.sendError(connectionManager, cmdId, cmd, "Initialization Failed");
+                        else  router.sendResponse(connectionManager,cmd,cmdId,null);
+                        break;
+                    }
+                    else {
+                        router.sendError(connectionManager, cmdId, cmd, "Invalid Request");
+                    }
+                    break;
+                }
+
+                case WEBRTC_SDP: {
+                    if (!(media instanceof WebRtcMedia)) {
+                        router.sendError(connectionManager, cmdId, cmd, "Not in WebRTC mode");
+                        break;
+                    }
+                    if (streamMode != StreamMode.WebRtc) {
+                        router.sendError(connectionManager, cmdId, cmd, "Not in WebRTC mode");
+                        router.sendError(connectionManager, cmdId, cmd, "Stream Mode Out of sync");
+                        break;
+                    }
+                    JSONObject params = json.optJSONObject(PARAM);
+                    if (params == null) {
+                        router.sendError(connectionManager, cmdId, cmd, "Missing SDP params");
+                        break;
+                    }
+
+                    ((WebRtcMedia) media).setSdp(params);
+                    // No immediate ACK — WebRtcMedia sends the answer asynchronously.
+                    // WebRtcMedia must send:
+                    // { "type":"ack","cmd":"webrtc_offer","cmdId":"...","userId":"...","sdp":"<answer>" }
+                    break;
+                }
+
+                case WEBRTC_ICE: {
+                    if (streamMode != StreamMode.WebRtc) {
+                        router.sendError(connectionManager, cmdId, cmd, "Not in WebRTC mode");
+                        break;
+                    }
+                    JSONObject params = json.optJSONObject(PARAM);
+                    if (params == null) {
+                        router.sendError(connectionManager, cmdId, cmd, "Missing ICE params");
+                        break;
+                    }
+                    params.put("cmdId",  cmdId);
+                    params.put("userId", json.optString("userId", ""));
+
+                    ((WebRtcMedia) media).SetIce(params);
+                    // No immediate ACK — WebRtcMedia sends ICE candidates asynchronously.
+                    // WebRtcMedia must send:
+                    // { "type":"ack","cmd":"webrtc_ice","cmdId":"...","userId":"...","candidate":"..." }
+                    break;
+                }
+
 
                 case "play": {
                     media.StreamMute(false);
-                    router.sendResponse(connectionManager, cmdId, cmd);
                     break;
                 }
 
                 case "pause": {
                     media.StreamMute(true);
-                    router.sendResponse(connectionManager, cmdId, cmd);
                     break;
                 }
 
                 case "mute": {
                     if (streamMode == StreamMode.WebRtc) {
                         ((WebRtcMedia) media).AudioMute();
-                        router.sendResponse(connectionManager, cmdId, cmd);
                     } else {
                         router.sendError(connectionManager, cmdId, cmd, "Audio mute only supported in WebRTC mode");
                     }
@@ -153,129 +289,21 @@ public class StreamRoute  {
 
                 case "flip": {
                     short r = media.FlipCamera();
-                    if (r == 0) router.sendResponse(connectionManager, cmdId, cmd);
-                    else        router.sendError(connectionManager, cmdId, cmd, "Flip failed: " + r);
                     break;
                 }
 
                 case "rotate": {
                     short r = media.RotateCamera();
-                    if (r == 0) router.sendResponse(connectionManager, cmdId, cmd);
-                    else        router.sendError(connectionManager, cmdId, cmd, "Rotate failed: " + r);
-                    break;
-                }
-
-                case "switch": {
-                    short r = media.SwitchCamera();
-                    if (r == 0) router.sendResponse(connectionManager, cmdId, cmd);
-                    else        router.sendError(connectionManager, cmdId, cmd, "Camera switch failed: " + r);
-                    break;
-                }
-
-                // ── Resolution / bitrate setters ──────────────────────────────
-
-                case "set_stream_res": {
-                    // FIX: was "params1" (typo) — corrected to "params"
-                    JSONObject params = json.optJSONObject("params");
-                    if (params == null) {
-                        router.sendError(connectionManager, cmdId, cmd, "Missing params object");
-                        break;
-                    }
-                    boolean ok = true;
-                    if (params.has("width")) {
-                        int width  = params.optInt("width",  -1);
-                        int height = params.optInt("height", -1);
-                        int fps    = params.optInt("fps",    -1);
-                        if (width > 0 && height > 0 && fps > 0) {
-                            if (media.SetStreamResolution(width, height, fps) != 0) ok = false;
-                        }
-                    }
-                    if (params.has("bitrate")) {
-                        int bitrate = params.optInt("bitrate", -1);
-                        if (bitrate > 0) {
-                            if (media.SetStreamBitrate(bitrate) != 0) ok = false;
-                        }
-                    }
-                    if (ok) router.sendResponse(connectionManager, cmdId, cmd);
-                    else    router.sendError(connectionManager, cmdId, cmd, "Failed to apply stream resolution/bitrate");
-                    break;
-                }
-
-                case "set_record_res": {
-                    JSONObject params = json.optJSONObject("params");
-                    if (params == null) {
-                        router.sendError(connectionManager, cmdId, cmd, "Missing params object");
-                        break;
-                    }
-                    boolean ok = true;
-                    if (params.has("width")) {
-                        int width  = params.optInt("width",  -1);
-                        int height = params.optInt("height", -1);
-                        int fps    = params.optInt("fps",    -1);
-                        if (width > 0 && height > 0 && fps > 0) {
-                            if (media.SetRecordingResolution(width, height, fps) != 0) ok = false;
-                        }
-                    }
-                    if (params.has("bitrate")) {
-                        int bitrate = params.optInt("bitrate", -1);
-                        if (bitrate > 0) {
-                            if (media.SetRecordingBitrate(bitrate) != 0) ok = false;
-                        }
-                    }
-                    if (ok) router.sendResponse(connectionManager, cmdId, cmd);
-                    else    router.sendError(connectionManager, cmdId, cmd, "Failed to apply record resolution/bitrate");
-                    break;
-                }
-                // ── WebRTC ────────────────────────────────────────────────────
-
-                case "webrtc_offer": {
-                    if (streamMode != StreamMode.WebRtc) {
-                        router.sendError(connectionManager, cmdId, cmd, "Not in WebRTC mode");
-                        break;
-                    }
-                    JSONObject params = json.optJSONObject("params");
-                    if (params == null) {
-                        router.sendError(connectionManager, cmdId, cmd, "Missing SDP params");
-                        break;
-                    }
-                    // Echo cmdId and userId into params so WebRtcMedia can include
-                    // them in its async answer, allowing the server to route the
-                    // SDP answer back to the correct user via sendToUser(userId).
-                    params.put("cmdId",  cmdId);
-                    params.put("userId", json.optString("userId", ""));
-                    ((WebRtcMedia) media).setSdp(params);
-                    // No immediate ACK — WebRtcMedia sends the answer asynchronously.
-                    // WebRtcMedia must send:
-                    // { "type":"ack","cmd":"webrtc_offer","cmdId":"...","userId":"...","sdp":"<answer>" }
-                    break;
-                }
-
-                case "webrtc_ice": {
-                    if (streamMode != StreamMode.WebRtc) {
-                        router.sendError(connectionManager, cmdId, cmd, "Not in WebRTC mode");
-                        break;
-                    }
-                    JSONObject params = json.optJSONObject("params");
-                    if (params == null) {
-                        router.sendError(connectionManager, cmdId, cmd, "Missing ICE params");
-                        break;
-                    }
-                    params.put("cmdId",  cmdId);
-                    params.put("userId", json.optString("userId", ""));
-                    ((WebRtcMedia) media).SetIce(params);
-                    // No immediate ACK — WebRtcMedia sends ICE candidates asynchronously.
-                    // WebRtcMedia must send:
-                    // { "type":"ack","cmd":"webrtc_ice","cmdId":"...","userId":"...","candidate":"..." }
                     break;
                 }
 
                 default:
-                    router.sendError(connectionManager, cmdId, cmd, "Unknown command: " + cmd);
+                    router.sendError(connectionManager, cmdId, cmd, "[Android] Unknown command: " + cmd);
                     break;
             }
 
         } catch (Exception e) {
-            router.sendError(connectionManager, cmdId, cmd, "Internal error: " + e.getMessage());
+            // LOG TODO
             e.printStackTrace();
         }
     }

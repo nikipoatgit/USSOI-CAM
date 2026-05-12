@@ -16,6 +16,7 @@ import org.webrtc.MediaStream;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
 import org.webrtc.RtpReceiver;
+import org.webrtc.RtpSender;
 import org.webrtc.RtpTransceiver;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
@@ -25,6 +26,7 @@ import org.webrtc.VideoSource;
 import org.webrtc.VideoTrack;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -182,35 +184,25 @@ public final class WebRtcPeerConnection {
             return;
         }
 
-        // Create video source
+        // Create video source & track
         surfaceTextureHelper = SurfaceTextureHelper.create(
                 "CaptureThread", getEglContext());
 
-        videoSource    = factory.createVideoSource(/* isScreencast= */ false);
+        videoSource     = factory.createVideoSource(/* isScreencast= */ false);
         localVideoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, videoSource);
         localVideoTrack.setEnabled(true);
 
-        RtpTransceiver.RtpTransceiverInit init =
-                new RtpTransceiver.RtpTransceiverInit(
-                        RtpTransceiver.RtpTransceiverDirection.SEND_ONLY);
-
-        peerConnection.addTransceiver(localVideoTrack, init);
-
-
-        // AUDIO
-        MediaConstraints audioConstraints = new MediaConstraints();
-
-        audioSource = factory.createAudioSource(audioConstraints);
+        // Create audio source & track
+        audioSource = factory.createAudioSource(new MediaConstraints());
         audioTrack  = factory.createAudioTrack("ARDAMSa0", audioSource);
         audioTrack.setEnabled(true);
 
-        RtpTransceiver.RtpTransceiverInit audioInit =
-                new RtpTransceiver.RtpTransceiverInit(
-                        RtpTransceiver.RtpTransceiverDirection.SEND_ONLY);
-
-        peerConnection.addTransceiver(audioTrack, audioInit);
-
-
+        // Add tracks via addTrack (NOT addTransceiver) so that when the browser
+        // offer arrives, setRemoteDescription can match these tracks to the
+        // incoming m-lines and createAnswer produces a=sendonly instead of a=inactive.
+        List<String> streamIds = Collections.singletonList(STREAM_ID);
+        peerConnection.addTrack(localVideoTrack, streamIds);
+        peerConnection.addTrack(audioTrack, streamIds);
 
         Log.d(TAG, "PeerConnection created");
     }
@@ -246,12 +238,21 @@ public final class WebRtcPeerConnection {
             surfaceTextureHelper.dispose();
             surfaceTextureHelper = null;
         }
+        if (audioTrack != null) {
+            audioTrack.setEnabled(false);
+            audioTrack.dispose();
+            audioTrack = null;
+        }
+        if (audioSource != null) {
+            audioSource.dispose();
+            audioSource = null;
+        }
         if (peerConnection != null) {
             peerConnection.close();
             peerConnection.dispose();
             peerConnection = null;
         }
-        Log.d(TAG, "PeerConnection closed");
+        Log.d(TAG, "PeerConnection closed and all resources released");
     }
 
     // -------------------------------------------------------------------------
@@ -273,56 +274,75 @@ public final class WebRtcPeerConnection {
         peerConnection.createOffer(sdpObserver, constraints);
     }
 
-    /**
-     * Applies the remote SDP (offer or answer) received over signaling.
-     *
-     * @param sdpJson JSONObject with {@code "type"} ("offer"/"answer") and
-     *                {@code "sdp"} (SDP string) keys.
-     */
-    public synchronized void setRemoteDescription(JSONObject sdpJson) {
+
+    public synchronized void setRemoteDescription(JSONObject json) {
         if (peerConnection == null) return;
+
         try {
+            JSONObject sdpJson = json.getJSONObject("sdp");
+
             String typeStr = sdpJson.getString("type");
             String sdpStr  = sdpJson.getString("sdp");
 
-            SessionDescription.Type type = SessionDescription.Type.fromCanonicalForm(typeStr);
-            SessionDescription sdp = new SessionDescription(type, sdpStr);
+            SessionDescription.Type type =
+                    SessionDescription.Type.fromCanonicalForm(typeStr);
+
+            SessionDescription sdp =
+                    new SessionDescription(type, sdpStr);
 
             peerConnection.setRemoteDescription(new SdpObserver() {
-                @Override public void onCreateSuccess(SessionDescription sd)  {}
-                @Override public void onSetSuccess() {
+
+                @Override
+                public void onCreateSuccess(SessionDescription sd) {}
+
+                @Override
+                public void onSetSuccess() {
                     Log.d(TAG, "Remote description set: " + typeStr);
-                    // If we received an offer, auto-create an answer
+
                     if (type == SessionDescription.Type.OFFER) {
                         createAnswer();
                     }
                 }
-                @Override public void onCreateFailure(String s) {}
-                @Override public void onSetFailure(String s) {
+
+                @Override
+                public void onCreateFailure(String s) {}
+
+                @Override
+                public void onSetFailure(String s) {
                     callback.onError("setRemoteDescription failed: " + s);
                 }
+
             }, sdp);
+
         } catch (Exception e) {
-            callback.onError("setRemoteDescription exception: " + e.getMessage());
+            callback.onError(
+                    "setRemoteDescription exception: " + e.getMessage()
+            );
         }
     }
 
-    /**
-     * Adds a remote ICE candidate received over signaling.
-     *
-     * @param candidateJson JSONObject with {@code "sdpMid"},
-     *                      {@code "sdpMLineIndex"}, and {@code "candidate"} keys.
-     */
-    public synchronized void  addIceCandidate(JSONObject candidateJson) {
+    public synchronized void addIceCandidate(JSONObject json) {
         if (peerConnection == null) return;
+
         try {
+            JSONObject candidateJson = json.getJSONObject("candidate");
+
             IceCandidate candidate = new IceCandidate(
                     candidateJson.getString("sdpMid"),
                     candidateJson.getInt("sdpMLineIndex"),
-                    candidateJson.getString("candidate"));
+                    candidateJson.getString("candidate")
+            );
+
             peerConnection.addIceCandidate(candidate);
+
+            Log.d(TAG, "ICE candidate added");
+
         } catch (Exception e) {
             Log.e(TAG, "addIceCandidate failed", e);
+
+            callback.onError(
+                    "addIceCandidate exception: " + e.getMessage()
+            );
         }
     }
 
@@ -381,8 +401,18 @@ public final class WebRtcPeerConnection {
 
     private void createAnswer() {
         if (peerConnection == null) return;
-        MediaConstraints constraints = new MediaConstraints();
-        peerConnection.createAnswer(sdpObserver, constraints);
+
+        // After setRemoteDescription the transceivers exist — force SEND_ONLY
+        // on any transceiver that has a live sender track. This is what makes
+        // the answer say a=sendonly instead of a=inactive.
+        for (RtpTransceiver transceiver : peerConnection.getTransceivers()) {
+            RtpSender sender = transceiver.getSender();
+            if (sender != null && sender.track() != null) {
+                transceiver.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY);
+            }
+        }
+
+        peerConnection.createAnswer(sdpObserver, new MediaConstraints());
     }
 
     // -------------------------------------------------------------------------
@@ -457,4 +487,3 @@ public final class WebRtcPeerConnection {
                 @Override public void onAddTrack(RtpReceiver r, MediaStream[] s) {}
             };
 }
-

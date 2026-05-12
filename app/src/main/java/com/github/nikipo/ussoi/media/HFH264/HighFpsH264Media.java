@@ -21,8 +21,6 @@ import com.github.nikipo.ussoi.network.Webscoket.WebSocketHandler;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 
-import org.json.JSONObject;
-
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
@@ -195,7 +193,7 @@ public class HighFpsH264Media implements Media, CameraControl {
     }
 
     @Override
-    public void stop() {
+    public void stopStream() {
         if (drainRunning) {
             stopDrainThread();
             if (streamingEncoder != null) streamingEncoder.stop();
@@ -213,7 +211,7 @@ public class HighFpsH264Media implements Media, CameraControl {
         if (glRenderer != null) { glRenderer.release(); glRenderer = null; }
 
         if (cameraController != null) { cameraController.stop(); cameraController = null; }
-        if (webSocketHandler != null) { webSocketHandler.closeConnection(); webSocketHandler = null; }
+        if (webSocketHandler != null) { webSocketHandler.close(); webSocketHandler = null; }
 
         hqSurface = null;
         lqSurface = null;
@@ -377,7 +375,7 @@ public class HighFpsH264Media implements Media, CameraControl {
     // ── Media — camera ────────────────────────────────────────────────────────
 
     @Override
-    public short SwitchCamera() {
+    public short SwitchCamera(int camId) {
         if (localRecorder != null && localRecorder.isRecordingActive()) {
             logger.log(TAG + ": SwitchCamera — stop recording first");
             return -1;
@@ -404,10 +402,6 @@ public class HighFpsH264Media implements Media, CameraControl {
         return 0; // implemented on host side
     }
 
-    @Override
-    public JSONObject SupportedResolutions() {
-        return highSpeedCameraHelper.SupportedResolutions(currentCameraId);
-    }
 
     // ── CameraControl — all no-ops / warnings in high-speed mode ─────────────
 
@@ -586,7 +580,7 @@ public class HighFpsH264Media implements Media, CameraControl {
             StreamingEncoder.EncodedFrame frame = streamingEncoder.dequeue();
             if (frame == null) continue;
             if (webSocketHandler != null) {
-                webSocketHandler.connSendPayloadBytes(buildPacket(frame));
+                webSocketHandler.sendBytes(buildPacket(frame));
             }
         }
     }

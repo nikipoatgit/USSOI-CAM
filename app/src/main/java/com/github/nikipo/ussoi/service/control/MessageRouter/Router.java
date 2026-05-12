@@ -86,7 +86,7 @@ public class Router{
 
             // ── Param commands ────────────────────────────────────────────────
             case GET_PARAMS:
-                sendParams(null);
+                sendParams();
                 break;
 
             case SET_PARAMS:
@@ -131,7 +131,7 @@ public class Router{
             case SET_RECORD_RES:
             case SET_STREAM_RES:
             case WEBRTC_ICE:
-            case WEBRTC_OFFER:
+            case WEBRTC_SDP:
                 if (!is_params_set) {
                     sendError(connectionManager, cmdId, cmd, "Params not set");
                     return;
@@ -145,7 +145,7 @@ public class Router{
         }
     }
 
-    private void sendParams(JSONObject json) {
+    private void sendParams() {
         try {
             JSONObject data = new JSONObject();
             data.put(HF_SUPPORT, high_fps_support);
@@ -164,7 +164,15 @@ public class Router{
         String cmdId = json.optString(CMD_ID, EMPTY);
         // Todo Implement this
         String telem_rate = json.optString(TELEMETRY_RATE, EMPTY);
-        StreamMode mode = StreamMode.fromString(json.optString(STREAM_MODE, EMPTY));
+
+        JSONObject param = json.optJSONObject("param");
+        StreamMode mode = null;
+
+        if (param != null) {
+            mode = StreamMode.fromString(
+                    param.optString(STREAM_MODE, EMPTY)
+            );
+        }
 
         if (mode == null) {
             sendError(connectionManager, cmdId, SET_PARAMS, "Invalid Stream Mode");
@@ -194,7 +202,7 @@ public class Router{
         sendResponse(connectionManager, SET_PARAMS ,  cmdId ,null);
 
         // make sure parameters are updated on user side
-        sendParams(null);
+        sendParams();
     }
 
     private static boolean hasHighFpsCamera() {
