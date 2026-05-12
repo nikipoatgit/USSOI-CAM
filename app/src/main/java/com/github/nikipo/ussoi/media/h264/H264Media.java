@@ -86,42 +86,6 @@ public class H264Media implements Media, CameraControl {
         logger = Logging.getInstance(context);
         preferences = SaveInputFields.getInstance(context).get_shared_pref();
         cameraHelper = new CameraHelper(context);
-
-
-        // check if any camera exist
-        try {
-            String[] ids = cameraHelper.getCameraIdList();
-            if (ids == null || ids.length == 0) {
-                // LOG todo
-                return;
-            }
-            currentCameraId = ids[0];
-        } catch (CameraAccessException e) {
-            //LOG TODO
-            return;
-        }
-
-
-        // Connect WS
-        webSocketHandler = new WebSocketHandler(context,new WebSocketHandler.MessageCallback() {
-            public void onOpen() {}
-            @Override
-            public void onPayloadReceivedText(String payload) {
-            }
-            @Override
-            public void onPayloadReceivedByte(byte[] payload) {
-            }
-            @Override
-            public void onClosed() {
-            }
-            @Override
-            public void onError(String e) {
-            }
-        });
-
-        webSocketHandler.setupConnection(KEY_stream_api_path,preferences.getString(KEY_Session_KEY,EMPTY));
-
-        initilised = true;
     }
 
     private void initSurfaces() {
@@ -204,6 +168,7 @@ public class H264Media implements Media, CameraControl {
         return false;
     }
 
+    // in prev version it was decided to use close instead of stopStream this method is kept for legacy purposes
     public void close() {
        stopStream();
 
@@ -219,9 +184,43 @@ public class H264Media implements Media, CameraControl {
 
     @Override
     public short StartStream() {
-        if (!initilised) return -4;
         if (drainRunning)  return -2; // already streaming
         if (StreamRes == null) return -3;
+
+        // check if any camera exist
+        try {
+            String[] ids = cameraHelper.getCameraIdList();
+            if (ids == null || ids.length == 0) {
+                // LOG todo
+                return -4;
+            }
+            currentCameraId = ids[0];
+        } catch (CameraAccessException e) {
+            //LOG TODO
+            return -4;
+        }
+
+
+        // Connect WS
+        webSocketHandler = new WebSocketHandler(context,new WebSocketHandler.MessageCallback() {
+            public void onOpen() {}
+            @Override
+            public void onPayloadReceivedText(String payload) {
+            }
+            @Override
+            public void onPayloadReceivedByte(byte[] payload) {
+            }
+            @Override
+            public void onClosed() {
+            }
+            @Override
+            public void onError(String e) {
+            }
+        });
+
+        webSocketHandler.setupConnection(KEY_stream_api_path,preferences.getString(KEY_Session_KEY,EMPTY));
+
+        initilised = true;
 
         initSurfaces();
         if (initEncoders()) return -5;
@@ -277,35 +276,42 @@ public class H264Media implements Media, CameraControl {
 
         hqSurface = null;
         lqSurface = null;
-    }
-    private byte[] buildPacket(StreamingEncoder.EncodedFrame frame) {
-        if (basePtsUs < 0) basePtsUs = frame.ptsUs;
 
-        long pts       = frame.ptsUs - basePtsUs;
-        ByteBuffer src = frame.data.duplicate();
-        int size = HEADER_SIZE + src.remaining();
-
-        if (packetBuffer.capacity() < size) {
-            packetBuffer = ByteBuffer.allocateDirect(size * 2);
+        synchronized (lock) {
+            // Disconnect WS
+            if (webSocketHandler != null) {
+                webSocketHandler.close();
+                webSocketHandler = null;
+            }
         }
+    }
 
-        packetBuffer.clear();
+    // Offset   Size    Description
+    //------   ----    ------------------------
+    //0        1       Keyframe flag
+    //1        8       Relative timestamp (PTS)
+    //9        N       Encoded video frame data
+    private byte[] buildPacket(StreamingEncoder.EncodedFrame frame) {
 
-        packetBuffer.put((byte)(frame.keyFrame ? 1 : 0));
-        packetBuffer.putLong(pts);
-        packetBuffer.put(src);
+        if (basePtsUs < 0)
+            basePtsUs = frame.ptsUs;
 
-        byte[] data = new byte[packetBuffer.position()];
-        packetBuffer.flip();
-        packetBuffer.get(data);
+        long pts = frame.ptsUs - basePtsUs;
 
-        int i          = 0;
+        ByteBuffer src = frame.data.duplicate();
+
+        byte[] data = new byte[1 + 8 + src.remaining()];
+
+        int i = 0;
 
         data[i++] = (byte) (frame.keyFrame ? 1 : 0);
+
         for (int b = 7; b >= 0; b--) {
-            data[i++] = (byte) (pts >> (b * 8));
+            data[i++] = (byte)(pts >> (b * 8));
         }
+
         src.get(data, i, src.remaining());
+
         return data;
     }
 
