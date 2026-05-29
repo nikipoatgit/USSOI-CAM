@@ -157,9 +157,31 @@ public class StreamRoute  {
                             router.sendError(connectionManager, cmdId, cmd, "Invalid Resolution");
                             break;
                         }
-                        if (media.SetRecordingResolution(width, height, fps) != 0) {
-                            // todo implement fix res / fps login rather than dynamic
-                            router.sendError(connectionManager, cmdId, cmd, "Resolution Unavailable");
+                        short result = media.SetRecordingResolution(width, height, fps);
+
+                        if (result != 0) {
+
+                            String errorMsg;
+
+                            switch (result) {
+                                case -1:
+                                    errorMsg = "Cannot change resolution recording active";
+                                    break;
+
+                                case -3:
+                                    errorMsg = "Requested resolution not supported";
+                                    break;
+
+                                case -4:
+                                    errorMsg = "Media system is not initialized";
+                                    break;
+
+                                default:
+                                    errorMsg = "Unknown resolution configuration error";
+                                    break;
+                            }
+
+                            router.sendError(connectionManager, cmdId, cmd, errorMsg);
                         }
                         else router.sendResponse(connectionManager,cmd,cmdId,null);
                     }
@@ -196,12 +218,33 @@ public class StreamRoute  {
                         }
 
                         short r = media.SetStreamResolution(width, height, fps);
-                        // todo implement fix res / fps login rather than dynamic
-                        if (r == -4) router.sendError(connectionManager, cmdId, cmd, "Initialization Failed");
-                        else if (r == -3) router.sendError(connectionManager, cmdId, cmd, "Resolution Unavailable");
-                        else if (r == -1) router.sendError(connectionManager, cmdId, cmd, "Recording Active");
-                        else if (r == -2) router.sendError(connectionManager, cmdId, cmd, "Stream Encoder null");
-                        else  router.sendResponse(connectionManager,cmd,cmdId,null);
+
+                        if (r != 0) {
+                            String errorMsg;
+                            switch (r) {
+                                case -1:
+                                    errorMsg = "Cannot change stream resolution while recording is active";
+                                    break;
+                                case -2:
+                                    errorMsg = "Streaming encoder is unavailable";
+                                    break;
+                                case -3:
+                                    errorMsg = "Requested stream resolution or FPS is not supported";
+                                    break;
+                                case -4:
+                                    errorMsg = "Media system is not initialized";
+                                    break;
+                                case -5:
+                                    errorMsg = "Failed to initialize streaming encoder";
+                                    break;
+                                default:
+                                    errorMsg = "Unknown stream configuration error";
+                                    break;
+                            }
+                            router.sendError(connectionManager, cmdId, cmd, errorMsg);
+                        } else {
+                            router.sendResponse(connectionManager, cmd, cmdId, null);
+                        }
                         break;
                     }
 

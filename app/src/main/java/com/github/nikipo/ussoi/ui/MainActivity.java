@@ -7,6 +7,8 @@ import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_url;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_USB_Switch;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.MASK;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.USSOI_version;
+import static com.github.nikipo.ussoi.storage.StorageUtils.normaliseUrl;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.PasswordMask;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -236,8 +238,7 @@ public class MainActivity extends AppCompatActivity {
         if (btSelected) connectionToggleGroup.check(R.id.btnBt);
         else if (usbSelected) connectionToggleGroup.check(R.id.btnUsb);
 
-        roomId.setText("••••••••");
-        roomPwd.setText("••••••••");
+        roomPwd.setText(PasswordMask);
     }
 
     @OptIn(markerClass = UnstableApi.class)
@@ -246,9 +247,7 @@ public class MainActivity extends AppCompatActivity {
             serviceController.stop(serviceButton);
         } else {
             // Save inputs before starting
-            String url = urlIp.getText().toString().trim();
-            if (!url.endsWith("/")) url += "/";
-
+            String url = normaliseUrl(urlIp.getText().toString().trim());
             pref.edit().putString(KEY_url, url).putString(KEY_device_name,deviceName.getText().toString().trim()).putBoolean(KEY_BT_SWITCH, radioBt.isChecked()).putBoolean(KEY_USB_Switch, radioUsb.isChecked()).apply();
 
             // Handle Password Update securely
