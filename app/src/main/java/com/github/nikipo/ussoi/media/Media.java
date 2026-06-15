@@ -19,32 +19,48 @@ import android.content.Context;
  * *****************************************************************************
  */
 public interface Media {
-    // todo implement close
-
-    // sets up context and initial variable
+    // Must be called before any other API.
     void init(Context ctx);
 
-    //tears down every thing
+    // Safe to call multiple times.
+    void close();
+
+    // Requires valid camera ID and stream resolution.
+    void StartStream();
+
+    // Streaming must be active.
     void stopStream();
 
-
-    // creates every thing form factory
-    short StartStream();
-    short SetStreamResolution(int width, int height, int fps);
-    short SetStreamBitrate(int bitrate);
+    // Streaming must be stopped.
+   // Resolution/FPS must be supported by selected camera.
+    void SetStreamResolution(int width, int height, int fps);
+    void SetStreamBitrate(int bitrate);
     boolean IsStreaming();
+
+    // Streaming must be active.
     void StreamMute(boolean mute);
 
-    // Stream methods
-    short StartRecording();
-    short SetRecordingResolution(int width, int height, int fps);
-    short SetRecordingBitrate(int bitrate);
+    // Requires valid recording resolution.
+    void StartRecording();
+
+    // Recording must be stopped.
+// Resolution/FPS must be supported by selected camera.
+    void SetRecordingResolution(int width, int height, int fps);
+
+    void SetRecordingBitrate(int bitrate);
+
     boolean IsRecording();
+
+    // Recording must be active.
     void StopRecording();
 
-    // utility
-    short SwitchCamera(int camId);
-    short RotateCamera();
-    short FlipCamera();
+    // Recording must not be active.
+    void SwitchCamera(int camId);
+
+    // Host implementation required.
+    void RotateCamera();
+
+    // Host implementation required.
+    void FlipCamera();
 }
 

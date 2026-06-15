@@ -18,7 +18,7 @@ package com.github.nikipo.ussoi.ui;
  * *****************************************************************************
  */
 public class UssoiStrings {
-
+    public static final int TELEMETRY_INTERVAL = 3000;
     public  static final String PasswordMask = "••••••••";
     public static final String PARAMS_NOT_SET = "Params Not Set";
     public static final String UNKNOWN_CMD_TIMEOUT = "Unknown Command / Timeout";

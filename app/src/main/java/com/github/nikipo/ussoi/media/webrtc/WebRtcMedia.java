@@ -11,7 +11,7 @@ import android.util.Log;
 
 import com.github.nikipo.ussoi.media.CameraControl;
 import com.github.nikipo.ussoi.media.Media;
-import com.github.nikipo.ussoi.media.camera.CameraController;
+import com.github.nikipo.ussoi.media.h264.CameraController;
 import com.github.nikipo.ussoi.service.control.ConnectionManager;
 import com.github.nikipo.ussoi.storage.logs.Logging;
 
@@ -37,55 +37,9 @@ import java.util.List;
  * If no LICENSE file is present, this software is provided "AS IS",
  * without warranty of any kind, express or implied.
  * <p>
- * *****************************************************************************
+ * ***************************************************short**************************
  */
 
-/**
- * WebRTC implementation of {@link Media} and {@link CameraControl}.
- *
- * <p>Architecture (all components live in this package):
- * <pre>
- *
- *   ┌──────────────────────────────────────────────────────┐
- *   │                    WebRtcMedia                       │
- *   │  (orchestrator — implements Media + CameraControl)   │
- *   └──────────┬────────────────────┬──────────────────────┘
- *              │                    │
- *   ┌──────────▼──────────┐  ┌──────▼────────────────────┐
- *   │  WebRtcCameraSource  │  │  WebRtcPeerConnection     │
- *   │  (Camera2Capturer    │  │  (PeerConnectionFactory,  │
- *   │   + LocalRecorder)   │  │   SDP, ICE, bitrate)      │
- *   └──────────────────────┘  └──────────-────────────────┘
- *
- *   Re-used from H264Media:
- *     • CameraHelper     — camera ID cycling, resolution + FPS queries
- *     • CameraController — Camera2 exposure / focus controls (manual-mode)
- *     • LocalRecorder    — local MP4 recording
- * </pre>
- *
- * <p><b>Streaming lifecycle:</b>
- * <ol>
- *   <li>{@link #init(Context)} — one-time setup: stores context, initialises the
- *       WebRTC factory (no-op on subsequent calls), and instantiates
- *       {@link WebRtcCameraSource} and {@link WebRtcPeerConnection}. No camera
- *       is opened and no network resources are allocated.</li>
- *   <li>{@link #StartStream()} — creates the peer connection, starts the camera
- *       capturer, and fires the SDP offer. Everything live happens here.</li>
- *   <li>{@link #stopStream()} — tears down the capturer, peer connection, and
- *       camera controller in reverse order. Safe to call repeatedly. A subsequent
- *       {@link #StartStream()} will rebuild cleanly.</li>
- * </ol>
- *
- * <p><b>Thread safety:</b> All public methods are {@code synchronized}. Callbacks
- * from signaling and the peer connection arrive on foreign threads and are
- * dispatched safely.
- *
- * <p><b>Manual camera controls (CameraControl):</b> WebRTC's
- * {@link org.webrtc.Camera2Capturer} does not expose Camera2 manual controls.
- * A separate {@link CameraController} instance is used purely for applying
- * exposure / focus parameters to the same physical camera; it shares no state
- * with the capturer's Camera2 session.
- */
 public class WebRtcMedia implements Media, CameraControl {
 
     private static final String TAG = "WebRtcMedia";
@@ -121,15 +75,12 @@ public class WebRtcMedia implements Media, CameraControl {
 
     private final ConnectionManager connectionManager;
 
-    // -------------------------------------------------------------------------
-    // Configuration — set before StartStream(); safe to change between streams
-    // -------------------------------------------------------------------------
 
     private int videoWidth       = 1280;
     private int videoHeight      = 720;
-    private int videoFps         = 30;
-    private int streamBitrateBps = 1_500_000;
-    private int recordBitrateBps = 8_000_000;
+    private int videoFps         = 20;
+    private int streamBitrateBps = 400_000;
+    private int recordBitrateBps = 1_000_000;
 
     private List<String> iceServers = DEFAULT_ICE_SERVERS;
 
@@ -163,20 +114,6 @@ public class WebRtcMedia implements Media, CameraControl {
         this.connectionManager = connectionManager;
     }
 
-    // =========================================================================
-    // Media — lifecycle
-    // =========================================================================
-
-    /**
-     * One-time initialisation. Safe to call multiple times — subsequent calls
-     * are no-ops if already initialised.
-     *
-     * <p>Only stores the context and initialises the WebRTC factory (which is
-     * itself idempotent). No camera, capturer, or peer connection is created here.
-     * Call {@link #StartStream()} to actually start streaming.
-     *
-     * @param ctx Any context; {@code getApplicationContext()} is used internally.
-     */
     @Override
     public synchronized void init(Context ctx) {
         if (context != null) {
@@ -193,71 +130,73 @@ public class WebRtcMedia implements Media, CameraControl {
         Log.d(TAG, "WebRtcMedia init complete — call StartStream() to begin streaming");
     }
 
-    /**
-     * Creates and starts all streaming resources:
-     * <ol>
-     *   <li>Peer connection (ICE, SDP plumbing)</li>
-     *   <li>Camera capturer → feeds frames into the WebRTC video source</li>
-     *   <li>Camera controller for manual exposure / focus</li>
-     *   <li>SDP offer — signaling begins immediately</li>
-     * </ol>
-     *
-     * <p>If a stream is already running it is stopped first via
-     * {@link #stopStream()} before a fresh one is started.
-     *
-     * @return 0 on success, -1 if init has not been called or resources failed.
-     */
     @Override
-    public synchronized short StartStream() {
+    public void close() {
+        stopStream();
+    }
+
+    @Override
+    public synchronized String StartStream() {
+
         if (context == null) {
             Log.e(TAG, "StartStream — call init() first");
-            return -1;
+            return "Streamer not initialized";
         }
 
-        if (streaming){
-            return -2;
+        if (streaming) {
+            return "Stream already running";
         }
 
-        // Tear down any previous stream cleanly before rebuilding
         stopStream();
 
         Log.d(TAG, "StartStream — creating peer connection and camera capturer");
 
-        // 1. Peer connection (creates VideoSource, AudioSource, SurfaceTextureHelper)
+        // 1. Peer connection
         peerConnection = new WebRtcPeerConnection(context, peerConnectionCallback);
-        peerConnection.create(iceServers);
+
+        String error = peerConnection.create(iceServers);
+        if (error != null) {
+            peerConnection = null;
+            return "Peer connection failed: " + error;
+        }
 
         if (peerConnection.getVideoSource() == null) {
             Log.e(TAG, "StartStream — peer connection creation failed");
             logger.log(TAG + ": StartStream — peerConnection.create() failed");
             peerConnection = null;
-            return -1;
+            return "Video source creation failed";
         }
 
-        // 2. Camera source — instantiate and start capturing into the WebRTC video source
-        cameraSource = new WebRtcCameraSource(
-                context,
-                videoWidth, videoHeight, videoFps,
-                recordBitrateBps);
+        try {
+            // 2. Camera source
+            cameraSource = new WebRtcCameraSource(
+                    context,
+                    videoWidth,
+                    videoHeight,
+                    videoFps,
+                    recordBitrateBps);
 
-        cameraSource.start(
-                peerConnection.getVideoSource(),
-                peerConnection.getSurfaceTextureHelper());
+            cameraSource.start(
+                    peerConnection.getRotatingCapturerObserver(),
+                    peerConnection.getSurfaceTextureHelper());
 
-        // Sync resolved dimensions back (capturer may snap to nearest hardware size)
-        videoWidth  = cameraSource.getWidth();
-        videoHeight = cameraSource.getHeight();
-        videoFps    = cameraSource.getFps();
+            videoWidth = cameraSource.getWidth();
+            videoHeight = cameraSource.getHeight();
+            videoFps = cameraSource.getFps();
 
-        // 3. Camera controller for manual exposure / focus (advisory, best-effort)
-        cameraController = new CameraController(context);
+            // 3. Camera controller
+            cameraController = new CameraController(context);
 
-        // 4. Kick off SDP negotiation — onLocalSdpReady fires when offer is ready
-        peerConnection.createOffer();
+        } catch (Exception e) {
+            stopStream();
+            return "Camera startup failed: " + e.getMessage();
+        }
 
-        Log.d(TAG, "StartStream — offer sent, waiting for signaling. Config: "
-                + videoWidth + "x" + videoHeight + " @" + videoFps + "fps");
-        return 0;
+        Log.d(TAG,
+                "StartStream — offer sent, waiting for signaling. Config: "
+                        + videoWidth + "x" + videoHeight + " @" + videoFps + "fps");
+
+        return null;
     }
 
     /**
@@ -275,57 +214,100 @@ public class WebRtcMedia implements Media, CameraControl {
      * will create everything fresh.
      */
     @Override
-    public synchronized void stopStream() {
-        if (cameraSource == null && peerConnection == null && cameraController == null) {
-            // Nothing to tear down
-            return;
+    public synchronized String stopStream() {
+
+        if (cameraSource == null &&
+                peerConnection == null &&
+                cameraController == null) {
+            return "Stream already stopped";
         }
 
         Log.d(TAG, "stopStream — releasing all stream resources");
 
-        streaming  = false;
+        StringBuilder errors = new StringBuilder();
+
+        streaming = false;
         audioMuted = false;
 
-        // 1. Camera controller
         if (cameraController != null) {
-            try { cameraController.stop(); } catch (Exception e) { Log.w(TAG, "cameraController.stop()", e); }
+            try {
+                cameraController.stop();
+            } catch (Exception e) {
+                Log.w(TAG, "cameraController.stop()", e);
+                errors.append("camera controller; ");
+            }
             cameraController = null;
         }
 
-        // 2. Camera source — stop recording first, then the capturer
         if (cameraSource != null) {
-            try { cameraSource.stopRecording();   } catch (Exception e) { Log.w(TAG, "stopRecording",     e); }
-            try { cameraSource.releaseRecorder(); } catch (Exception e) { Log.w(TAG, "releaseRecorder",   e); }
-            try { cameraSource.stop();            } catch (Exception e) { Log.w(TAG, "cameraSource.stop", e); }
+            try {
+                cameraSource.stopRecording();
+            } catch (Exception e) {
+                Log.w(TAG, "stopRecording", e);
+                errors.append("stop recording; ");
+            }
+
+            try {
+                cameraSource.releaseRecorder();
+            } catch (Exception e) {
+                Log.w(TAG, "releaseRecorder", e);
+                errors.append("release recorder; ");
+            }
+
+            try {
+                cameraSource.stop();
+            } catch (Exception e) {
+                Log.w(TAG, "cameraSource.stop", e);
+                errors.append("camera source; ");
+            }
+
             cameraSource = null;
         }
 
-        // 3. Peer connection — disposes video/audio tracks, sources,
-        //    surfaceTextureHelper, and the PeerConnection itself
         if (peerConnection != null) {
-            try { peerConnection.close(); } catch (Exception e) { Log.w(TAG, "peerConnection.close()", e); }
+            try {
+                peerConnection.close();
+            } catch (Exception e) {
+                Log.w(TAG, "peerConnection.close()", e);
+                errors.append("peer connection; ");
+            }
             peerConnection = null;
         }
 
-        Log.d(TAG, "stopStream — all resources released; ready for StartStream()");
-    }
+        Log.d(TAG, "stopStream — all resources released");
 
+        if (errors.length() > 0) {
+            return "Cleanup issues: " + errors;
+        }
+
+        return null; // success
+    }
     // =========================================================================
     // Media — stream configuration
     // =========================================================================
 
     @Override
-    public synchronized short SetStreamResolution(int width, int height, int fps) {
-        if (cameraSource == null) return -2;
-        if (IsRecording())        return -3;
+    public synchronized String SetStreamResolution(int width, int height, int fps) {
+
+        if (cameraSource == null) {
+            return "Stream not running";
+        }
+
+        if (IsRecording()) {
+            return "Cannot change resolution while recording";
+        }
 
         boolean changed = cameraSource.changeCaptureFormat(width, height, fps);
-        if (!changed) return -1;
+
+        if (!changed) {
+            return "Unsupported resolution or fps";
+        }
 
         videoWidth  = cameraSource.getWidth();
         videoHeight = cameraSource.getHeight();
         videoFps    = cameraSource.getFps();
-        return 0;
+
+        return null;
     }
 
     /**
@@ -335,12 +317,23 @@ public class WebRtcMedia implements Media, CameraControl {
      * @return 0 always.
      */
     @Override
-    public synchronized short SetStreamBitrate(int bitrate) {
-        streamBitrateBps = bitrate;
-        if (peerConnection != null && streaming) {
-            peerConnection.setBitrate(bitrate);
+    public synchronized String SetStreamBitrate(int bitrate) {
+
+        if (bitrate <= 0) {
+            return "Invalid bitrate";
         }
-        return 0;
+
+        streamBitrateBps = bitrate;
+
+        if (peerConnection != null && streaming) {
+            try {
+                peerConnection.setBitrate(bitrate);
+            } catch (Exception e) {
+                return "Bitrate update failed";
+            }
+        }
+
+        return null;
     }
 
     @Override
@@ -359,10 +352,37 @@ public class WebRtcMedia implements Media, CameraControl {
         }
     }
 
-    // RotateCamera applied on client side
+
     @Override
-    public short RotateCamera() {
-        return 0;
+    public synchronized String RotateCamera() {
+
+        if (cameraSource == null) {
+            return "Stream not running";
+        }
+
+        try {
+            // 1. Advance rotation in the camera source
+            int newRotation = cameraSource.rotateVideo();
+
+            // 2. Update frame relay rotation
+            if (peerConnection != null) {
+                peerConnection.setFrameRotation(newRotation);
+            }
+
+            // Sync dimensions
+            videoWidth  = cameraSource.getWidth();
+            videoHeight = cameraSource.getHeight();
+
+            Log.d(TAG,
+                    "RotateCamera → " + newRotation + "°  "
+                            + videoWidth + "x" + videoHeight);
+
+            return null;
+
+        } catch (Exception e) {
+            Log.e(TAG, "RotateCamera failed", e);
+            return "Rotation failed";
+        }
     }
 
     @Override
@@ -385,13 +405,28 @@ public class WebRtcMedia implements Media, CameraControl {
      *         -1  not initialised (stream not running)
      */
     @Override
-    public synchronized short StartRecording() {
-        if (cameraSource == null) return -1;
-        cameraSource.stopRecording();
-        cameraSource.releaseRecorder();
-        cameraSource.prepareRecorder();
-        cameraSource.startRecording();
-        return 0;
+    public synchronized String StartRecording() {
+
+        if (cameraSource == null) {
+            return "Stream not running";
+        }
+
+        if (IsRecording()) {
+            return "Recording already active";
+        }
+
+        try {
+            cameraSource.stopRecording();
+            cameraSource.releaseRecorder();
+            cameraSource.prepareRecorder();
+            cameraSource.startRecording();
+
+            return null;
+
+        } catch (Exception e) {
+            Log.e(TAG, "StartRecording failed", e);
+            return "Recorder startup failed";
+        }
     }
 
     /**
@@ -400,9 +435,10 @@ public class WebRtcMedia implements Media, CameraControl {
      * @return -1 always (not independently configurable).
      */
     @Override
-    public short SetRecordingResolution(int width, int height, int fps) {
-        logger.log(TAG + ": SetRecordingResolution — recording resolution matches stream; use SetStreamResolution");
-        return -1;
+    public String SetRecordingResolution(int width, int height, int fps) {
+        logger.log(TAG +": SetRecordingResolution — recording resolution uses StreamResolution");
+
+        return "Recording resolution follows stream resolution";
     }
 
     /**
@@ -412,13 +448,19 @@ public class WebRtcMedia implements Media, CameraControl {
      *         -1  cannot change while recording is active
      */
     @Override
-    public synchronized short SetRecordingBitrate(int bitrate) {
+    public synchronized String SetRecordingBitrate(int bitrate) {
+
+        if (bitrate <= 0) {
+            return "Invalid bitrate";
+        }
+
         if (cameraSource != null && cameraSource.isRecordingActive()) {
             logger.log(TAG + ": SetRecordingBitrate — cannot change while recording");
-            return -1;
+            return "Cannot change bitrate while recording";
         }
+
         recordBitrateBps = bitrate;
-        return 0;
+        return null;
     }
 
     @Override
@@ -427,10 +469,24 @@ public class WebRtcMedia implements Media, CameraControl {
     }
 
     @Override
-    public synchronized void StopRecording() {
-        if (cameraSource != null) cameraSource.stopRecording();
-    }
+    public synchronized String StopRecording() {
 
+        if (cameraSource == null) {
+            return "cameraSource is Null";
+        }
+
+        if (!cameraSource.isRecordingActive()) {
+            return "Recording was not active";
+        }
+
+        try {
+            cameraSource.stopRecording();
+            return null;
+        } catch (Exception e) {
+            Log.e(TAG, "StopRecording failed", e);
+            return "Failed to stop recording";
+        }
+    }
     // =========================================================================
     // Media — camera
     // =========================================================================
@@ -443,10 +499,25 @@ public class WebRtcMedia implements Media, CameraControl {
      *         -2  not initialised
      */
     @Override
-    public synchronized short SwitchCamera(int camId) {
-        if (cameraSource == null) return -2;
-        boolean ok = cameraSource.switchCamera();
-        return ok ? (short) 0 : (short) -1;
+    public synchronized String SwitchCamera(int camId) {
+
+        if (cameraSource == null) {
+            return "cameraSource is Null";
+        }
+
+        try {
+            boolean ok = cameraSource.switchCamera();
+
+            if (!ok) {
+                return "Camera switch failed";
+            }
+
+            return null;
+
+        } catch (Exception e) {
+            Log.e(TAG, "SwitchCamera failed", e);
+            return "Camera switch error";
+        }
     }
 
     // =========================================================================
