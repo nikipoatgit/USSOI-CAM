@@ -238,6 +238,7 @@ public class MainActivity extends AppCompatActivity {
         if (btSelected) connectionToggleGroup.check(R.id.btnBt);
         else if (usbSelected) connectionToggleGroup.check(R.id.btnUsb);
 
+        roomId.setText(PasswordMask);
         roomPwd.setText(PasswordMask);
     }
 
@@ -252,7 +253,7 @@ public class MainActivity extends AppCompatActivity {
 
             // Handle Password Update securely
             String currentId = roomId.getText().toString().trim();
-            String currentPwd = roomPwd.getText().toString();
+            String currentPwd = roomPwd.getText().toString().trim();
             // Only save if user actually typed something new (not dots)
             if (!MASK.equals(currentId) && !MASK.equals(currentPwd)) {
                 saveInputFields.saveCredentials(currentId, currentPwd);

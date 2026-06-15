@@ -1,29 +1,26 @@
 package com.github.nikipo.ussoi.media.h264;
 
+import static com.github.nikipo.ussoi.media.utility.CameraHelper.checkForExactSupportedResolution;
+import static com.github.nikipo.ussoi.media.utility.CameraHelper.getOptimalFpsRange;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Session_KEY;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_stream_api_path;
-import static com.github.nikipo.ussoi.ui.UssoiStrings.EMPTY;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.ERROR;
 
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.hardware.camera2.CameraAccessException;
-import android.util.Log;
 import android.util.Range;
 import android.util.Size;
 import android.view.Surface;
 
-import com.github.nikipo.ussoi.media.CameraControl;
-import com.github.nikipo.ussoi.media.camera.CameraHelper;
 import com.github.nikipo.ussoi.media.Media;
-import com.github.nikipo.ussoi.media.camera.CameraController;
 import com.github.nikipo.ussoi.media.enocders.LocalRecorder;
 import com.github.nikipo.ussoi.media.enocders.StreamingEncoder;
+import com.github.nikipo.ussoi.media.utility.CameraHelper;
 import com.github.nikipo.ussoi.network.Webscoket.WebSocketHandler;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
-import com.github.nikipo.ussoi.storage.logs.Logging;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 
 /**
  * *****************************************************************************
@@ -41,460 +38,295 @@ import java.nio.ByteBuffer;
  * <p>
  * *****************************************************************************
  */
-public class H264Media implements Media, CameraControl {
+public class H264Media implements Media {
     private static final String TAG = "H264Media";
-    private SharedPreferences preferences;
-    private WebSocketHandler webSocketHandler;
-    private CameraHelper cameraHelper;
-    private Logging logger;
+    private CameraController camera;
+    private StreamingEncoder streamEncoder;
+    private LocalRecorder recorder;
+    private WebSocketHandler websocket;
     private Context context;
-    private volatile long basePtsUs = -1;
+    private H264Config h264Config;
+    private boolean initialized = false;
+    private Surface LQSurface ;
+    private Surface HQSurface ;
+    private SharedPreferences preferences;
+    private SurfaceMode surfaceMode;
 
-    // Stream config (LQ)
-    private Size StreamRes;
-    private int streamFps = 20;
-    private int streamBitratebps = 500_000;
-
-    // Record config (HQ)
-    private Size recordRes;
-    private int recordFps = 20;
-    private int recordBitratebps = 5_000_000;
-
-    private final Object lock = new Object();
-    private Thread drainThread;
-    private volatile boolean drainRunning = false;
-
-    // Camera being used
-    private String currentCameraId = null;
-
-    // Encoders
-    private LocalRecorder localRecorder;
-    private StreamingEncoder streamingEncoder;
-
-    // Surfaces
-    private Surface hqSurface = null; // LocalRecorder input surface
-    private Surface lqSurface = null; // StreamingEncoder input surface
-
-    // camera2 abstraction
-    private CameraController cameraController;
-    private boolean initilised = false;
-    private ByteBuffer packetBuffer = ByteBuffer.allocateDirect(1024 * 1024);
 
     @Override
-    public void init(Context ctx) {
+    public synchronized void init(Context ctx) {
+        if (initialized) {
+            return;
+        }
         context = ctx.getApplicationContext();
-        logger = Logging.getInstance(context);
-        preferences = SaveInputFields.getInstance(context).get_shared_pref();
-        cameraHelper = new CameraHelper(context);
-
-        try {
-            String[] ids = cameraHelper.getCameraIdList();
-            if (ids == null || ids.length == 0) {
-                return;
-            }
-            currentCameraId = ids[0];
+        h264Config = new H264Config();
+        h264Config.recordingConfig.bitrate = 1_000_000*8;  // 1MBps
+        h264Config.streamConfig.bitrate = 50_000*8; // 50KBps
+        try{
+            h264Config.cameraId = CameraHelper.getCameraIdList(context)[0];
         } catch (CameraAccessException e) {
             return;
         }
 
-        initilised = true;
-    }
+        surfaceMode = SurfaceMode.LQ_ONLY;
 
-    /**
-     * Tears down encoders and camera session.
-     * NOTE: intentionally does NOT touch webSocketHandler — callers that
-     * want to keep the WS connection alive (e.g. SetStreamResolution,
-     * SwitchCamera) rely on this guarantee.
-     */
-    private void initSurfaces() {
-        basePtsUs = -1;
+        websocket = new WebSocketHandler(
+                context,
+                new WebSocketHandler.MessageCallback() {
 
-        synchronized (lock) {
-            if (streamingEncoder != null) {
-                streamingEncoder.release();
-                streamingEncoder = null;
-            }
-            if (localRecorder != null) {
-                localRecorder.release();
-                localRecorder = null;
-            }
-        }
+                    @Override
+                    public void onOpen() {
 
-        hqSurface = null;
-        lqSurface = null;
+                    }
 
-        synchronized (lock) {
-            if (cameraController != null) {
-                cameraController.stop();
-                cameraController = null;
-            }
-        }
-    }
+                    @Override
+                    public void onPayloadReceivedText(String payload) {
 
-    /**
-     * Builds encoders, surfaces, and the camera session.
-     * Returns true on error, false on success (keeps the original convention).
-     */
-    private boolean initEncoders() {
-        try {
-            Log.d(TAG, "initEncoders: START");
+                    }
 
-            if (StreamRes == null || recordRes == null) return true;
+                    @Override
+                    public void onPayloadReceivedByte(byte[] payload) {
 
-            streamingEncoder = new StreamingEncoder();
-            localRecorder = new LocalRecorder(context);
+                    }
 
-            lqSurface = streamingEncoder.prepare(
-                    StreamRes.getWidth(),
-                    StreamRes.getHeight(),
-                    streamFps,
-                    streamBitratebps
-            );
-            if (lqSurface == null) return true;
+                    @Override
+                    public void onClosed() {
 
-            hqSurface = localRecorder.prepare(
-                    recordRes.getWidth(),
-                    recordRes.getHeight(),
-                    recordFps,
-                    recordBitratebps
-            );
-            if (hqSurface == null) return true;
+                    }
 
-            Log.d(TAG, "StreamRes: " + StreamRes.getWidth() + "x" + StreamRes.getHeight()
-                    + " @" + streamFps + " bitrate=" + streamBitratebps);
-            Log.d(TAG, "RecordRes: " + recordRes.getWidth() + "x" + recordRes.getHeight()
-                    + " @" + recordFps + " bitrate=" + recordBitratebps);
+                    @Override
+                    public void onError(String error) {
 
-            int fpsQueryFps = Math.max(recordFps, streamFps);
-
-            cameraController = new CameraController(context);
-            cameraController.attachLQSurface(lqSurface);
-            if (hqSurface != null) cameraController.attachHQSurface(hqSurface);
-
-            Range<Integer> fpsRange = cameraHelper.getOptimalFpsRange(currentCameraId, fpsQueryFps);
-            if (fpsRange == null) return true;
-
-            cameraController.start(currentCameraId, fpsRange);
-
-        } catch (IOException e) {
-            Log.e(TAG, "initEncoders failed", e);
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * Starts the encoder, resumes camera to the LQ surface, and spins up the
-     * drain thread that pulls encoded frames and sends them over WebSocket.
-     * Assumes the WS connection and encoder pipeline are already in place.
-     */
-    private void startDrainLoop() {
-        streamingEncoder.start();
-        cameraController.resumeStreaming();
-
-        drainRunning = true;
-        drainThread = new Thread(() -> {
-            while (drainRunning) {
-                StreamingEncoder.EncodedFrame frame = streamingEncoder.dequeue();
-                if (frame != null && webSocketHandler != null) {
-                    webSocketHandler.sendBytes(buildPacket(frame));
+                    }
                 }
-            }
-        }, "StreamDrainThread");
-        drainThread.setDaemon(true);
-        drainThread.start();
-    }
+        );
 
-    // Kept for legacy callers — delegates to stopStream().
-    public void close() {
-        stopStream();
+        preferences = SaveInputFields.getInstance(context).get_shared_pref();
 
-        synchronized (lock) {
-            if (webSocketHandler != null) {
-                webSocketHandler.close();
-                webSocketHandler = null;
-            }
-        }
+        websocket.setupConnection(KEY_stream_api_path,preferences.getString(KEY_Session_KEY,ERROR));
+
+        initialized = true;
     }
 
     @Override
-    public short StartStream() {
-        if (drainRunning) return -2;   // already streaming
-        if (StreamRes == null)  return -3;
+    public void close() {
+        stopCamera();
+        stopStream();
+        stopRecorder();
+        stopWebSocket();
+    }
 
-        // Connect WebSocket
-        webSocketHandler = new WebSocketHandler(context, new WebSocketHandler.MessageCallback() {
-            public void onOpen() {}
-            @Override public void onPayloadReceivedText(String payload) {}
-            @Override public void onPayloadReceivedByte(byte[] payload) {}
-            @Override public void onClosed() {}
-            @Override public void onError(String e) {}
-        });
-        webSocketHandler.setupConnection(KEY_stream_api_path,
-                preferences.getString(KEY_Session_KEY, EMPTY));
+    @Override
+    public synchronized void StartStream() {
+        if (!initialized) {
+            throw new IllegalStateException("Media not initialized");
+        }
+        if (streamEncoder != null){
+            throw new IllegalStateException("Stream Already Running");
+        }
+        if (h264Config.streamConfig.res == null){
+            throw new IllegalStateException("Stream Resolution not set");
+        }
+        if (recorder != null){
+            throw new IllegalStateException("Recording Active");
+        }
+        if (!checkForExactSupportedResolution(
+                context,
+                h264Config.cameraId,
+                h264Config.streamConfig.res.getWidth(),
+                h264Config.streamConfig.res.getHeight(),
+                h264Config.streamConfig.fpsRange
+        )){
+            throw new IllegalStateException("Resolution Incapable with Camera");
+        }
+        // all checks done
+        startEncoder();
 
-        initSurfaces();
-        if (initEncoders()) return -5;
-
-        startDrainLoop();
-        return 0;
+        try {
+            startCamera();
+        } catch (Exception e) {
+            stopCamera();
+            stopEncoder();
+            throw e;
+        }
     }
 
     @Override
     public void stopStream() {
-        synchronized (lock) {
-            if (streamingEncoder != null) {
-                stopDrainThread();
-                streamingEncoder.stop();
-                streamingEncoder.release();
-                streamingEncoder = null;
-            }
-            if (localRecorder != null) {
-                if (localRecorder.isRecordingActive()) localRecorder.stop();
-                localRecorder.release();
-                localRecorder = null;
-            }
+        if (recorder != null){
+            throw new IllegalStateException("Stop Recording First");
         }
-
-        synchronized (lock) {
-            if (cameraController != null) {
-                cameraController.stop();
-                cameraController = null;
-            }
-        }
-
-        hqSurface = null;
-        lqSurface = null;
-
-        synchronized (lock) {
-            if (webSocketHandler != null) {
-                webSocketHandler.close();
-                webSocketHandler = null;
-            }
-        }
-    }
-
-    // Packet layout:
-    // Offset  Size  Description
-    // 0       1     Keyframe flag (1 = keyframe, 0 = delta)
-    // 1       8     Relative PTS in microseconds (big-endian)
-    // 9       N     Encoded H.264 frame data
-    private byte[] buildPacket(StreamingEncoder.EncodedFrame frame) {
-        if (basePtsUs < 0)
-            basePtsUs = frame.ptsUs;
-
-        long pts = frame.ptsUs - basePtsUs;
-        ByteBuffer src = frame.data.duplicate();
-        byte[] data = new byte[1 + 8 + src.remaining()];
-        int i = 0;
-
-        data[i++] = (byte) (frame.keyFrame ? 1 : 0);
-        for (int b = 7; b >= 0; b--) {
-            data[i++] = (byte) (pts >> (b * 8));
-        }
-        src.get(data, i, src.remaining());
-        return data;
-    }
-
-    /**
-     * Changes stream resolution. Cannot be called while recording is active
-     * because both encoders share the same camera session and surfaces must be
-     * rebuilt from scratch.
-     *
-     * If streaming was active, the drain loop is stopped, the pipeline is
-     * rebuilt, and streaming resumes automatically. The existing WebSocket
-     * connection is reused — no reconnect occurs.
-     */
-    @Override
-    public short SetStreamResolution(int width, int height, int fps) {
-        if (!initilised) return -4;
-        if (localRecorder != null && localRecorder.isRecordingActive()) return -1;
-        if (!cameraHelper.checkForExactSupportedResolution(currentCameraId, width, height, fps)) return -3;
-
-        StreamRes = new Size(width, height);
-        streamFps = fps;
-
-        boolean wasStreaming = drainRunning;
-
-        // Stop only the drain loop; initSurfaces() handles encoder + camera teardown.
-        if (wasStreaming) stopDrainThread();
-
-        initSurfaces();
-        if (initEncoders()) return -5;
-
-        // Resume streaming on the new pipeline. WS connection is still live.
-        if (wasStreaming) startDrainLoop();
-
-        return 0;
+        stopCamera();
+        stopEncoder();
+        stopRecorder();
     }
 
     @Override
-    public short SetStreamBitrate(int bitrate) {
-        if (!initilised) return -4;
-        streamBitratebps = bitrate;
-        if (streamingEncoder != null && drainRunning) {
-            streamingEncoder.setBitrate(bitrate);
-            return 0;
+    public void SetStreamResolution(
+            int width,
+            int height,
+            int fps
+    ) {
+        Range<Integer> fpsRange = getOptimalFpsRange(context,h264Config.cameraId,fps);
+        if (!checkForExactSupportedResolution(
+                context,
+                h264Config.cameraId,
+                width,
+                height,
+                fpsRange
+        )) {
+            throw new IllegalStateException("Resolution not supported by camera");
         }
-        return -1;
+        h264Config.streamConfig.res =new Size(width, height);
+        h264Config.streamConfig.fpsRange = fpsRange;
+    }
+
+    @Override
+    public void SetStreamBitrate(int bitrate) {
+        h264Config.streamConfig.bitrate = bitrate;
+        if(streamEncoder != null) {
+            streamEncoder.setBitrate(h264Config.streamConfig.bitrate);
+        }
     }
 
     @Override
     public boolean IsStreaming() {
-        return drainRunning;
+        if (streamEncoder != null){
+            return streamEncoder.isStreaming;
+        }
+        return false;
     }
 
     @Override
     public void StreamMute(boolean mute) {
-        if (!initilised) return;
-        // Guard: pipeline may not be up if stream was never started.
-        if (streamingEncoder == null || cameraController == null) return;
+        throw new IllegalStateException("Functionality Unavailable");
+    }
 
-        if (mute) {
-            cameraController.pauseStreaming();
-            streamingEncoder.pauseStreaming();
-        } else {
-            cameraController.resumeStreaming();
-            streamingEncoder.resumeStreaming();
+    @Override
+    public void StartRecording() {
+        if (streamEncoder != null){
+            throw new IllegalStateException("Star");
         }
+        if (h264Config.recordingConfig.res == null) throw new IllegalStateException("Stream Res Null")
     }
 
-    /**
-     * Starts recording.
-     *
-     * - If the pipeline is already up (e.g. streaming is active), the
-     *   localRecorder is already prepared — just start it.
-     * - If the pipeline is not yet up, build it first, then start recording.
-     */
     @Override
-    public short StartRecording() {
-        if (!initilised) return -4;
-        if (recordRes == null)  return -3;
+    public void SetRecordingResolution(int width, int height, int fps) {
+    }
 
-        if (localRecorder != null) {
-            if (localRecorder.isRecordingActive()) return -2; // already recording
-            localRecorder.start();
-            return 0;
+    @Override
+    public void SetRecordingBitrate(int bitrate) {
+        if(recorder != null) {
+           throw new IllegalStateException("Recording Active can't change");
         }
-
-        // Pipeline not yet created (no stream running) — build it now.
-        initSurfaces();
-        if (initEncoders()) return -5;
-
-        localRecorder.start();
-        return 0;
-    }
-
-    /**
-     * Changes recording resolution. Cannot be called while recording is active
-     * because surfaces must be rebuilt. Does not restart anything automatically
-     * — the caller must start a new recording session after this call.
-     */
-    @Override
-    public short SetRecordingResolution(int width, int height, int fps) {
-        if (!initilised) return -4;
-        if (localRecorder != null && localRecorder.isRecordingActive()) return -1;
-        if (!cameraHelper.checkForExactSupportedResolution(currentCameraId, width, height, fps)) return -3;
-
-        recordRes = new Size(width, height);
-        recordFps = fps;
-        return 0;
-    }
-
-    @Override
-    public short SetRecordingBitrate(int bitrate) {
-        if (!initilised) return -4;
-        if (localRecorder != null && localRecorder.isRecordingActive()) return -1;
-        recordBitratebps = bitrate;
-        return 0;
+        h264Config.recordingConfig.bitrate = bitrate;
     }
 
     @Override
     public boolean IsRecording() {
-        return localRecorder != null && localRecorder.isRecordingActive();
+        if(recorder != null){
+            return recorder.isRecording;
+        }
+        return false;
     }
 
     @Override
     public void StopRecording() {
-        if (localRecorder != null && localRecorder.isRecordingActive()) {
-            localRecorder.stop();
+    }
+
+    @Override
+    public void SwitchCamera(int camId) {
+    }
+
+    @Override
+    public void RotateCamera() {
+    }
+
+    @Override
+    public void FlipCamera() {
+    }
+
+    private void stopWebSocket(){
+        if (websocket != null){
+            websocket.close();
+            websocket = null;
         }
     }
 
-    /**
-     * Switches to a different camera by index.
-     *
-     * Cannot be called while recording is active (requires pipeline rebuild).
-     * If streaming is currently active, the pipeline is rebuilt on the new
-     * camera and streaming resumes automatically. The WS connection is reused.
-     */
-    @Override
-    public short SwitchCamera(int camIndex) {
-        if (!initilised) return -4;
-        if (localRecorder != null && localRecorder.isRecordingActive()) return -2;
-
+    private void startEncoder(){
+        streamEncoder = new StreamingEncoder();
         try {
-            String[] ids = cameraHelper.getCameraIdList();
-            if (ids == null || ids.length == 0) return -1;
-            if (camIndex < 0 || camIndex >= ids.length) return -1;
+            LQSurface = streamEncoder.prepare(
+                    h264Config.streamConfig.res.getWidth(),
+                    h264Config.streamConfig.res.getHeight(),
+                    h264Config.streamConfig.fpsRange.getUpper(),
+                    h264Config.streamConfig.bitrate
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("StreamEncoder IOException");
+        }
+    }
+    private void stopEncoder(){
+        if (streamEncoder != null){
+            streamEncoder.close();
+        }
+        streamEncoder = null;
+    }
 
-            currentCameraId = ids[camIndex];
+    private void startCamera(){
+        if (camera != null){
+            stopCamera();
+        }
+        if(sm == SurfaceMode.LQ_ONLY){
+            if (LQSurface == null || !LQSurface.isValid()) throw new IllegalStateException("Invalid LQSurface");
+            camera = new CameraController(context,sm);
+            camera.setLQSurface(LQSurface);
+            camera.start(h264Config.cameraId,h264Config.streamConfig.fpsRange);
+        }
+        else{
+            if (HQSurface == null || !HQSurface.isValid()) throw new IllegalStateException("Invalid HQSurface");
+            camera = new CameraController(context,sm);
+            camera.setLQSurface(LQSurface);
+            camera.setHQSurface(HQSurface);
+            Range<Integer> required =
+                    h264Config.streamConfig.fpsRange.getUpper() >=
+                            h264Config.recordingConfig.fpsRange.getUpper()
+                            ? h264Config.streamConfig.fpsRange
+                            : h264Config.recordingConfig.fpsRange;
 
-            // If streaming, restart the pipeline on the new camera.
-            // WS connection is reused — no reconnect needed.
-            if (drainRunning) {
-                stopDrainThread();
-                initSurfaces();
-                if (initEncoders()) return -5;
-                startDrainLoop();
-            }
+            camera.start(
+                    h264Config.cameraId,
+                    required
+            );
+        }
 
-            return 0;
-
-        } catch (Exception e) {
-            return -1;
+    }
+    private void stopCamera(){
+        if(camera != null){
+            camera.stop();
+            camera = null;
         }
     }
 
-    @Override
-    public short RotateCamera() {
-        // Implemented on the host side.
-        return 0;
-    }
-
-    @Override
-    public short FlipCamera() {
-        // Implemented on the host side.
-        return 0;
-    }
-
-    private void stopDrainThread() {
-        drainRunning = false;
-        if (drainThread != null) {
-            drainThread.interrupt();
-            try { drainThread.join(500); } catch (InterruptedException ignored) {}
-            drainThread = null;
+    private void startRecorder(){
+        if (recorder != null) throw new IllegalStateException("Recording Already Active");
+        recorder = new LocalRecorder(context);
+        try {
+            HQSurface = recorder.prepare(
+                    h264Config.recordingConfig.res.getWidth(),
+                    h264Config.recordingConfig.res.getHeight(),
+                    h264Config.recordingConfig.fpsRange.getUpper(),
+                    h264Config.recordingConfig.bitrate
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("recorder IOException");
         }
     }
 
-    @Override
-    public void setExposureCompensation(int value) { cameraController.setExposureCompensation(value); }
-
-    @Override
-    public void enableAutoExposure() { cameraController.enableAutoExposure(); }
-
-    @Override
-    public void disableAutoExposure() { cameraController.disableAutoExposure(); }
-
-    @Override
-    public void setManualExposure(long exposureTimeNs, int iso) { cameraController.setManualExposure(exposureTimeNs, iso); }
-
-    @Override
-    public void setManualFocus(float diopters) { cameraController.setManualFocus(diopters); }
-
-    @Override
-    public void enableAutoFocus() { cameraController.enableAutoFocus(); }
-
-    @Override
-    public void apply() { cameraController.apply(); }
+    private void stopRecorder(){
+        if (recorder != null){
+            recorder.close();
+        }
+        recorder = null;
+    }
 }

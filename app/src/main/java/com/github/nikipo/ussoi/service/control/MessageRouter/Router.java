@@ -1,6 +1,6 @@
 package com.github.nikipo.ussoi.service.control.MessageRouter;
 
-import static com.github.nikipo.ussoi.media.camera.CameraHelper.buildAllCamerasJson;
+import static com.github.nikipo.ussoi.media.utility.CameraHelper.buildAllCamerasJson;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Device_Id;
 import static com.github.nikipo.ussoi.ui.UssoiStrings.*;
 
@@ -8,7 +8,7 @@ import android.content.Context;
 import android.hardware.camera2.CameraManager;
 import android.util.Log;
 
-import com.github.nikipo.ussoi.media.camera.HighFPSCameraController;
+import com.github.nikipo.ussoi.media.hfh264.HighFPSCameraController;
 import com.github.nikipo.ussoi.service.control.ConnectionManager;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.storage.logs.Logging;
@@ -94,11 +94,11 @@ public class Router{
                 break;
 
             case GET_RES:
-                sendResponse(connectionManager,GET_RES,CMD_ID,camRes);
+                sendResponse(connectionManager,CMD_ID,GET_RES,camRes);
                 break;
 
             case GET_TUNNELS:
-                sendResponse(connectionManager,GET_TUNNELS,CMD_ID,tunnelRoute.getTunnels());
+                sendResponse(connectionManager,CMD_ID,GET_TUNNELS,tunnelRoute.getTunnels());
                 break;
 
             case START_TUNNEL:
@@ -107,11 +107,11 @@ public class Router{
                 break;
 
             case STATS:
-                sendResponse(connectionManager, cmd, cmdId, deviceInfoDynamic.buildSerialPacket());
+                sendResponse(connectionManager,cmdId,cmd, deviceInfoDynamic.buildSerialPacket());
                 break;
 
             case IDENTITY:
-                sendResponse(connectionManager,cmd,cmdId,deviceInfoStatic.getAll());
+                sendResponse(connectionManager,cmdId,cmd, deviceInfoStatic.getAll());
                 break;
 
             //Stop commands no paramsSet guard
@@ -152,7 +152,7 @@ public class Router{
             data.put(STREAM_MODE, streamMode.name());
             data.put(PARAMS_SET, is_params_set);
 
-            sendResponse(connectionManager,GET_PARAMS,CMD_ID,data);
+            sendResponse(connectionManager,CMD_ID,GET_PARAMS,data);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -193,13 +193,13 @@ public class Router{
                 sendError(connectionManager, cmdId, SET_PARAMS, reason);
                 return;
             }
-            streamRoute.stopStream();
+            streamRoute.closeStream();
         }
 
         streamRoute = new StreamRoute(connectionManager, this, ctx, streamMode);
         is_params_set = true;
 
-        sendResponse(connectionManager, SET_PARAMS ,  cmdId ,null);
+        sendResponse(connectionManager,cmdId,SET_PARAMS ,null);
 
         // make sure parameters are updated on user side
         sendParams();
@@ -225,7 +225,7 @@ public class Router{
     }
 
 
-    void sendResponse(ConnectionManager cm, String cmd, String cmdId, JSONObject data) {
+    void sendResponse(ConnectionManager cm, String cmdId, String cmd, JSONObject data) {
         try {
             JSONObject res = new JSONObject();
             res.put(TYPE, RESPONSE);
@@ -259,20 +259,31 @@ public class Router{
 
     public void stop() {
         if (tunnelRoute != null) tunnelRoute.stopTunnel();
-        if (streamRoute != null) streamRoute.stopStream();
+        if (streamRoute != null) streamRoute.closeStream();
     }
 
-    /**
-     * Returns a single hex char encoding live status bits:
-     *   bit 0 → any tunnel running
-     *   bit 1 → stream active
-     *   bit 2 → recording active
-     */
     public char getStatusTelem() {
         int status = 0;
-        if (tunnelRoute != null && tunnelRoute.isTunnelRunning()) status |= 1;
-        if (streamRoute  != null && streamRoute.isStreaming())    status |= 1 << 1;
-        if (streamRoute  != null && streamRoute.isRecording())    status |= 1 << 2;
+
+        boolean tunnelRunning =
+                tunnelRoute != null && tunnelRoute.isTunnelRunning();
+
+        boolean streaming =
+                streamRoute != null && streamRoute.isStreaming();
+
+        boolean recording =
+                streamRoute != null && streamRoute.isRecording();
+
+        if (tunnelRunning) status |= 1;
+        if (streaming)     status |= 1 << 1;
+        if (recording)     status |= 1 << 2;
+
+        Log.d(TAG,
+                "TelemStatus: tunnel=" + tunnelRunning +
+                        ", streaming=" + streaming +
+                        ", recording=" + recording +
+                        ", nibble=" + Integer.toHexString(status).toUpperCase());
+
         return "0123456789ABCDEF".charAt(status & 0x0F);
     }
 }

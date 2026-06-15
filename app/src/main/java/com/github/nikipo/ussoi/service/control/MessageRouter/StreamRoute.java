@@ -4,7 +4,7 @@ import static com.github.nikipo.ussoi.ui.UssoiStrings.*;
 
 import android.content.Context;import android.util.Log;
 
-import com.github.nikipo.ussoi.media.HFH264.HighFpsH264Media;
+import com.github.nikipo.ussoi.media.hfh264.HighFpsH264Media;
 import com.github.nikipo.ussoi.media.Media;
 import com.github.nikipo.ussoi.media.h264.H264Media;
 import com.github.nikipo.ussoi.media.webrtc.WebRtcMedia;
@@ -61,26 +61,33 @@ public class StreamRoute  {
             default:
                 media = new Media() {
                     @Override public void init(Context ctx) {}
-                    @Override public void stopStream() {}
-                    @Override public short StartStream()                              { return 0; }
-                    @Override public short SetStreamResolution(int w, int h, int f)  { return 0; }
-                    @Override public short SetStreamBitrate(int b)                   { return 0; }
+
+                    @Override
+                    public void close() {}
+                    @Override public String stopStream() {
+                        return null;
+                    }
+                    @Override public String StartStream()                              { return null; }
+                    @Override public String SetStreamResolution(int w, int h, int f)  { return null; }
+                    @Override public String SetStreamBitrate(int b)                   { return null; }
                     @Override public boolean IsStreaming()                            { return false; }
                     @Override public void StreamMute(boolean mute)                   {}
-                    @Override public short StartRecording()                           { return 0; }
-                    @Override public short SetRecordingResolution(int w, int h, int f){ return 0; }
-                    @Override public short SetRecordingBitrate(int b)                { return 0; }
+                    @Override public String StartRecording()                           { return null; }
+                    @Override public String SetRecordingResolution(int w, int h, int f){ return null; }
+                    @Override public String SetRecordingBitrate(int b)                { return null; }
                     @Override public boolean IsRecording()                            { return false; }
-                    @Override public void StopRecording()                             {}
-                    @Override public short SwitchCamera(int camId)                             { return 0; }
-                    @Override public short RotateCamera()                             { return 0; }
+                    @Override public String StopRecording()                             {
+                        return null;
+                    }
+                    @Override public String SwitchCamera(int camId)                             { return null; }
+                    @Override public String RotateCamera()                             { return null; }
                     @Override public short FlipCamera()                               { return 0; }
                 };
                 break;
         }
     }
 
-    public void stopStream()    { media.stopStream(); }
+    public void closeStream()    { media.close(); }
     public boolean isStreaming()  { return media.IsStreaming(); }
     public boolean isRecording()  { return media.IsRecording(); }
 
@@ -93,16 +100,11 @@ public class StreamRoute  {
             switch (cmd) {
 
                 case START_STREAM: {
-                    short r = media.StartStream();
-
-                    if (r == 0) router.sendResponse(connectionManager, cmdId, cmd,null);
-                    else if (r == -1) router.sendError(connectionManager, cmdId, cmd, "Stream Encoder / peer connection Null");
-                    else if (r == -2) router.sendError(connectionManager, cmdId, cmd, "Stream Already Running");
-                    else if (r == -3) router.sendError(connectionManager, cmdId, cmd, "Stream Resolution Not Set");
-                    else if (r == -4) router.sendError(connectionManager, cmdId, cmd, "Initialization Failed");
-                    else if (r == -5) router.sendError(connectionManager, cmdId, cmd, "Stream And Record Resolution Required");
-
-
+                    String status = media.StartStream();
+                    if (status == null) router.sendResponse(connectionManager, cmdId, cmd,null);
+                    else {
+                        router.sendError(connectionManager, cmdId, cmd,status);
+                    }
                     break;
                 }
 
@@ -117,27 +119,31 @@ public class StreamRoute  {
                 }
 
                 case START_RECORDING: {
-                    short r = media.StartRecording();
-                    if (r == 0) router.sendResponse(connectionManager, cmd, cmdId,null);
-                    else if (r == -1) router.sendError(connectionManager, cmdId, cmd, "Local Encoder Null");
-                    else if (r == -2) router.sendError(connectionManager, cmdId, cmd, "Recording Already Running");
+                    String status = media.StartRecording();
+                    if (status == null) router.sendResponse(connectionManager, cmdId, cmd,null);
+                    else {
+                        router.sendError(connectionManager, cmdId, cmd,status);
+                    }
                     break;
                 }
 
                 case STOP_RECORDING: {
                     media.StopRecording();
-                    router.sendResponse(connectionManager, cmd,cmdId,null);
+                    router.sendResponse(connectionManager,cmdId,cmd,null);
                     break;
                 }
 
                 case SWITCH: {
                     JSONObject param = json.optJSONObject(PARAM);
-                    if (param == null) break;
+                    if (param == null){
+                        break;
+                    }
 
-                    short r = media.SwitchCamera(param.optInt(CAM_ID,0));
-                    if (r == 0) router.sendResponse(connectionManager, cmd,cmdId,null);
-                    else if (r == -1) router.sendError(connectionManager, cmdId, cmd, "Recording Active");
-                    else if (r == -2) router.sendError(connectionManager, cmdId, cmd, "Internal Error");
+                    String status = media.SwitchCamera(param.optInt(CAM_ID,0));
+                    if (status == null) router.sendResponse(connectionManager, cmdId, cmd,null);
+                    else {
+                        router.sendError(connectionManager, cmdId, cmd,status);
+                    }
                     break;
                 }
 
@@ -157,33 +163,12 @@ public class StreamRoute  {
                             router.sendError(connectionManager, cmdId, cmd, "Invalid Resolution");
                             break;
                         }
-                        short result = media.SetRecordingResolution(width, height, fps);
+                        String status = media.SetRecordingResolution(width, height, fps);
 
-                        if (result != 0) {
-
-                            String errorMsg;
-
-                            switch (result) {
-                                case -1:
-                                    errorMsg = "Cannot change resolution recording active";
-                                    break;
-
-                                case -3:
-                                    errorMsg = "Requested resolution not supported";
-                                    break;
-
-                                case -4:
-                                    errorMsg = "Media system is not initialized";
-                                    break;
-
-                                default:
-                                    errorMsg = "Unknown resolution configuration error";
-                                    break;
-                            }
-
-                            router.sendError(connectionManager, cmdId, cmd, errorMsg);
+                        if (status == null) router.sendResponse(connectionManager,cmdId,cmd,null);
+                        else {
+                            router.sendError(connectionManager, cmdId, cmd, status);
                         }
-                        else router.sendResponse(connectionManager,cmd,cmdId,null);
                     }
                     else if (param.has(BITRATE)) {
                         int bitrate = param.optInt(BITRATE, -1);
@@ -191,9 +176,12 @@ public class StreamRoute  {
                             router.sendError(connectionManager, cmdId, cmd, "Invalid Record Bitrate");
                             break;
                         }
-                        short r = media.SetRecordingBitrate(bitrate);
-                        if (r == -4) router.sendError(connectionManager, cmdId, cmd, "Initialization Failed");
-                        else router.sendResponse(connectionManager,cmd,cmdId,null);
+                        String status = media.SetRecordingBitrate(bitrate);
+
+                        if (status == null) router.sendResponse(connectionManager,cmdId,cmd+ "Bitrate " + bitrate,null);
+                        else {
+                            router.sendError(connectionManager, cmdId, cmd, status);
+                        }
                     }
                     break;
                 }
@@ -217,34 +205,13 @@ public class StreamRoute  {
                             break;
                         }
 
-                        short r = media.SetStreamResolution(width, height, fps);
+                        String status = media.SetStreamResolution(width, height, fps);
 
-                        if (r != 0) {
-                            String errorMsg;
-                            switch (r) {
-                                case -1:
-                                    errorMsg = "Cannot change stream resolution while recording is active";
-                                    break;
-                                case -2:
-                                    errorMsg = "Streaming encoder is unavailable";
-                                    break;
-                                case -3:
-                                    errorMsg = "Requested stream resolution or FPS is not supported";
-                                    break;
-                                case -4:
-                                    errorMsg = "Media system is not initialized";
-                                    break;
-                                case -5:
-                                    errorMsg = "Failed to initialize streaming encoder";
-                                    break;
-                                default:
-                                    errorMsg = "Unknown stream configuration error";
-                                    break;
-                            }
-                            router.sendError(connectionManager, cmdId, cmd, errorMsg);
-                        } else {
-                            router.sendResponse(connectionManager, cmd, cmdId, null);
+                        if (status == null) router.sendResponse(connectionManager,cmdId,cmd,null);
+                        else {
+                            router.sendError(connectionManager, cmdId, cmd, status);
                         }
+
                         break;
                     }
 
@@ -254,10 +221,13 @@ public class StreamRoute  {
                             router.sendError(connectionManager, cmdId, cmd, "Invalid Stream Bitrate");
                             break;
                         }
-                        short r = media.SetStreamBitrate(bitrate);
-                        if (r == -4) router.sendError(connectionManager, cmdId, cmd, "Initialization Failed");
-                        else  router.sendResponse(connectionManager,cmd,cmdId,null);
-                        break;
+
+                        String status = media.SetStreamBitrate(bitrate);
+
+                        if (status == null) router.sendResponse(connectionManager,cmdId,cmd+ "Bitrate " + bitrate,null);
+                        else {
+                            router.sendError(connectionManager, cmdId, cmd, status);
+                        }
                     }
                     else {
                         router.sendError(connectionManager, cmdId, cmd, "Invalid Request");
@@ -311,17 +281,20 @@ public class StreamRoute  {
 
                 case "play": {
                     media.StreamMute(false);
+                    router.sendResponse(connectionManager,cmdId,cmd,null);
                     break;
                 }
 
                 case "pause": {
                     media.StreamMute(true);
+                    router.sendResponse(connectionManager,cmdId,cmd,null);
                     break;
                 }
 
                 case "mute": {
                     if (streamMode == StreamMode.WebRtc) {
                         ((WebRtcMedia) media).AudioMute();
+                        router.sendResponse(connectionManager,cmdId,cmd,null);
                     } else {
                         router.sendError(connectionManager, cmdId, cmd, "Audio mute only supported in WebRTC mode");
                     }
@@ -332,11 +305,16 @@ public class StreamRoute  {
 
                 case "flip": {
                     short r = media.FlipCamera();
+                    router.sendResponse(connectionManager,cmdId,cmd,null);
                     break;
                 }
 
                 case "rotate": {
-                    short r = media.RotateCamera();
+                    String status =  media.RotateCamera();
+                    if (status == null) router.sendResponse(connectionManager,cmdId,cmd,null);
+                    else {
+                        router.sendError(connectionManager, cmdId, cmd, status);
+                    }
                     break;
                 }
 

@@ -1,5 +1,7 @@
 package com.github.nikipo.ussoi.service.control;
 
+import static com.github.nikipo.ussoi.ui.UssoiStrings.TELEMETRY_INTERVAL;
+
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Handler;
@@ -11,6 +13,7 @@ import com.github.nikipo.ussoi.storage.logs.Logging;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.network.Webscoket.WebSocketHandler;
 import com.github.nikipo.ussoi.system.telemetry.SysTelemetry;
+import com.github.nikipo.ussoi.ui.UssoiStrings;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -158,7 +161,7 @@ public class ConnectionManager {
                         WebSocketHandler handler = webSocketHandler;
 
                         if (handler == null || !handler.isConnected()) {
-                            Thread.sleep(1000);
+                            Thread.sleep(UssoiStrings.TELEMETRY_INTERVAL);
                             continue;
                         }
 
@@ -168,8 +171,10 @@ public class ConnectionManager {
                         obj.put("cmd", "telem");
                         obj.put("hex", telemetry.getPacket() + sender.getStatusTelem());
 
+                        Log.d(TAG, "Telemetry TX = " + obj);
+
                         sender.send(obj);
-                        Thread.sleep(3000);
+                        Thread.sleep(TELEMETRY_INTERVAL);
 
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();

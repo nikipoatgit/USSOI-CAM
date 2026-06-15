@@ -76,7 +76,12 @@ public class WebSocketHandler {
 
         connect();
     }
-
+    public long getPendingBytes() {
+        if (webSocket == null) {
+            return 0;
+        }
+        return webSocket.queueSize();
+    }
     private void connect() {
         if (webSocket != null) {
             // Cancel existing connection attempts if any

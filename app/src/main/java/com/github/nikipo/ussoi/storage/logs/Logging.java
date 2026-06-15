@@ -79,8 +79,7 @@ public class Logging {
         }
     }
 
-
-    public void log(String message) {
+    public void logCsv(String tag, Object... values) {
         if (logExecutor.isShutdown()) return;
 
         final String ts =
@@ -91,6 +90,7 @@ public class Logging {
                 Log.e(TAG, "logFile not initialized yet");
                 return;
             }
+
             try (OutputStream os =
                          context.getContentResolver()
                                  .openOutputStream(logFile.getUri(), "wa");
@@ -98,43 +98,20 @@ public class Logging {
                          new BufferedWriter(
                                  new OutputStreamWriter(os, StandardCharsets.UTF_8))) {
 
-                writer.write("[" + ts + "] " + message);
+                StringBuilder sb = new StringBuilder();
+                sb.append(ts).append(",").append(tag);
+
+                for (Object value : values) {
+                    sb.append(",").append(value);
+                }
+
+                writer.write(sb.toString());
                 writer.newLine();
 
-            }catch (SecurityException | IOException e) {
+            } catch (SecurityException | IOException e) {
                 Log.e(TAG, "SAF permission revoked", e);
                 closeLogging();
             }
-
-        });
-    }
-
-    public void logMsg(String tag,String message) {
-        if (logExecutor.isShutdown()) return;
-
-        final String ts =
-                new SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(new Date());
-
-        logExecutor.execute(() -> {
-            if (logFile == null) {
-                Log.e(TAG, "logFile not initialized yet");
-                return;
-            }
-            try (OutputStream os =
-                         context.getContentResolver()
-                                 .openOutputStream(logFile.getUri(), "wa");
-                 BufferedWriter writer =
-                         new BufferedWriter(
-                                 new OutputStreamWriter(os, StandardCharsets.UTF_8))) {
-
-                writer.write("[" + ts + "] , " + tag + " , " +  message);
-                writer.newLine();
-
-            }catch (SecurityException | IOException e) {
-                Log.e(TAG, "SAF permission revoked", e);
-                closeLogging();
-            }
-
         });
     }
 

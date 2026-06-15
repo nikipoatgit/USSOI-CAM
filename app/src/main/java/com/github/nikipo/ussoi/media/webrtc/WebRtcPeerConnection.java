@@ -22,6 +22,7 @@ import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import org.webrtc.SurfaceTextureHelper;
 import org.webrtc.VideoCapturer;
+import org.webrtc.VideoFrame;
 import org.webrtc.VideoSource;
 import org.webrtc.VideoTrack;
 
@@ -45,24 +46,7 @@ import java.util.List;
  * <p>
  * *****************************************************************************
  */
-/**
- * Manages a single WebRTC {@link PeerConnection}.
- *
- * <p>Responsibilities:
- * <ul>
- *   <li>Initialize {@link PeerConnectionFactory} (once per process via
- *       {@link #initializeFactory(Context)}).</li>
- *   <li>Create/destroy the peer connection and its video track.</li>
- *   <li>SDP offer/answer negotiation via {@link #createOffer()} /
- *       {@link #setRemoteDescription(JSONObject)}.</li>
- *   <li>ICE candidate trickle.</li>
- *   <li>Runtime bitrate control via {@link #setBitrate(int)}.</li>
- * </ul>
- *
- * <p>This class is not thread-safe — all public methods must be called from
- * the same thread (typically the Media orchestrator thread or a dedicated
- * WebRTC thread).
- */
+
 public final class WebRtcPeerConnection {
 
     private static final String TAG           = "WebRtcPeerConn";
@@ -141,6 +125,16 @@ public final class WebRtcPeerConnection {
     private AudioSource audioSource;
     private AudioTrack audioTrack;
 
+    /** Current logical rotation (0/90/180/270) stamped onto every outgoing frame. */
+    private volatile int frameRotation = 0;
+
+    /**
+     * The capturer initialises against this sink instead of videoSource directly.
+     * Each frame has its rotation metadata rewritten before being forwarded — zero
+     * pixel-data copy, just a wrapper VideoFrame object.
+     */
+    private org.webrtc.VideoSink rotatingSink;
+
     // -------------------------------------------------------------------------
     // Constructor
     // -------------------------------------------------------------------------
@@ -154,16 +148,9 @@ public final class WebRtcPeerConnection {
     // Lifecycle
     // -------------------------------------------------------------------------
 
-    /**
-     * Creates the {@link PeerConnection} with the supplied ICE server list.
-     * Must call {@link #initializeFactory(Context)} before this.
-     *
-     * @param iceServers List of STUN/TURN server URIs
-     *                   (e.g. {@code "stun:stun.l.google.com:19302"}).
-     */
-    public synchronized void create(List<String> iceServers) {
+    public synchronized String create(List<String> iceServers) {
         if (factory == null) {
-            throw new IllegalStateException("Call WebRtcPeerConnection.initializeFactory() first");
+            return "WebRtcPeerConnection factory not initialized";
         }
 
         List<PeerConnection.IceServer> servers = new ArrayList<>();
@@ -177,40 +164,53 @@ public final class WebRtcPeerConnection {
         rtcConfig.continualGatheringPolicy =
                 PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
 
-        peerConnection = factory.createPeerConnection(rtcConfig, peerConnectionObserver);
+        peerConnection = factory.createPeerConnection(
+                rtcConfig,
+                peerConnectionObserver
+        );
 
         if (peerConnection == null) {
-            callback.onError("PeerConnection creation failed");
-            return;
+            return "PeerConnection creation failed";
         }
 
-        // Create video source & track
-        surfaceTextureHelper = SurfaceTextureHelper.create(
-                "CaptureThread", getEglContext());
+        try {
+            surfaceTextureHelper = SurfaceTextureHelper.create(
+                    "CaptureThread", getEglContext());
 
-        videoSource     = factory.createVideoSource(/* isScreencast= */ false);
-        localVideoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, videoSource);
-        localVideoTrack.setEnabled(true);
+            videoSource = factory.createVideoSource(false);
+            localVideoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, videoSource);
+            localVideoTrack.setEnabled(true);
 
-        // Create audio source & track
-        audioSource = factory.createAudioSource(new MediaConstraints());
-        audioTrack  = factory.createAudioTrack("ARDAMSa0", audioSource);
-        audioTrack.setEnabled(true);
+            rotatingSink = frame -> {
+                int rot = frameRotation;
+                if (rot != 0) {
+                    VideoFrame rotated = new VideoFrame(
+                            frame.getBuffer(),
+                            (frame.getRotation() + rot) % 360,
+                            frame.getTimestampNs());
+                    videoSource.getCapturerObserver().onFrameCaptured(rotated);
+                    rotated.release();
+                } else {
+                    videoSource.getCapturerObserver().onFrameCaptured(frame);
+                }
+            };
 
-        // Add tracks via addTrack (NOT addTransceiver) so that when the browser
-        // offer arrives, setRemoteDescription can match these tracks to the
-        // incoming m-lines and createAnswer produces a=sendonly instead of a=inactive.
-        List<String> streamIds = Collections.singletonList(STREAM_ID);
-        peerConnection.addTrack(localVideoTrack, streamIds);
-        peerConnection.addTrack(audioTrack, streamIds);
+            audioSource = factory.createAudioSource(new MediaConstraints());
+            audioTrack = factory.createAudioTrack("ARDAMSa0", audioSource);
+            audioTrack.setEnabled(true);
 
-        Log.d(TAG, "PeerConnection created");
+            List<String> streamIds = Collections.singletonList(STREAM_ID);
+            peerConnection.addTrack(localVideoTrack, streamIds);
+            peerConnection.addTrack(audioTrack, streamIds);
+
+            Log.d(TAG, "PeerConnection created");
+            return null; // success
+
+        } catch (Exception e) {
+            return "Initialization failed: " + e.getMessage();
+        }
     }
 
-    /**
-     * Returns the {@link VideoSource} so the capturer can deliver frames to it.
-     * Only valid after {@link #create(List)}.
-     */
     public VideoSource getVideoSource() {
         return videoSource;
     }
@@ -221,6 +221,53 @@ public final class WebRtcPeerConnection {
      */
     public SurfaceTextureHelper getSurfaceTextureHelper() {
         return surfaceTextureHelper;
+    }
+
+    /**
+     * Returns a {@link org.webrtc.VideoCapturer.CapturerObserver} that wraps the
+     * real video-source observer with rotation metadata injection.
+     *
+     * <p>Pass this to {@link org.webrtc.Camera2Capturer#initialize} instead of
+     * {@code videoSource.getCapturerObserver()} so every frame is stamped with the
+     * current {@link #frameRotation} before reaching the encoder.
+     */
+    public org.webrtc.CapturerObserver getRotatingCapturerObserver() {
+        return new org.webrtc.CapturerObserver() {
+            @Override
+            public void onCapturerStarted(boolean success) {
+                videoSource.getCapturerObserver().onCapturerStarted(success);
+            }
+            @Override
+            public void onCapturerStopped() {
+                videoSource.getCapturerObserver().onCapturerStopped();
+            }
+            @Override
+            public void onFrameCaptured(org.webrtc.VideoFrame frame) {
+                int rot = frameRotation;
+                if (rot != 0) {
+                    org.webrtc.VideoFrame rotated = new org.webrtc.VideoFrame(
+                            frame.getBuffer(),
+                            (frame.getRotation() + rot) % 360,
+                            frame.getTimestampNs());
+                    videoSource.getCapturerObserver().onFrameCaptured(rotated);
+                    rotated.release();
+                } else {
+                    videoSource.getCapturerObserver().onFrameCaptured(frame);
+                }
+            }
+        };
+    }
+
+    /**
+     * Updates the rotation (degrees) stamped on every outgoing video frame.
+     * Safe to call at any time — takes effect on the very next captured frame.
+     * Does NOT require stopping the capturer or the recorder.
+     *
+     * @param degrees 0, 90, 180, or 270.
+     */
+    public void setFrameRotation(int degrees) {
+        this.frameRotation = degrees;
+        Log.d(TAG, "frameRotation set to " + degrees + "°");
     }
 
     /** Releases all WebRTC resources. Safe to call multiple times. */
@@ -351,8 +398,20 @@ public final class WebRtcPeerConnection {
     // -------------------------------------------------------------------------
 
     /**
-     * Dynamically adjusts the video encoding bitrate.
-     * Uses RTP sender parameters to update the max bitrate on the active encoder.
+     * Dynamically adjusts the video encoding bitrate via RTP sender parameters.
+     *
+     * <p><b>Root-cause note:</b> {@code getParameters()} returns an object whose
+     * {@code encodings} list is <em>empty</em> until ICE + DTLS negotiation has
+     * completed and the encoder is running. Calling {@code setParameters()} with an
+     * empty list silently succeeds but changes nothing. The guard below logs a
+     * warning and bails out in that case; the bitrate is stored in
+     * {@link WebRtcMedia#streamBitrateBps} and re-applied by
+     * {@link WebRtcMedia.peerConnectionCallback#onConnected()} once the connection
+     * is fully established.
+     *
+     * <p>Both {@code minBitrateBps} and {@code maxBitrateBps} are set — omitting
+     * the minimum allows the encoder to clamp the bitrate to its own floor, which
+     * can make a high {@code maxBitrateBps} appear to have no effect.
      *
      * @param bitrateBps Target bitrate in bits per second.
      */
@@ -360,19 +419,30 @@ public final class WebRtcPeerConnection {
         if (peerConnection == null) return;
         try {
             for (RtpTransceiver transceiver : peerConnection.getTransceivers()) {
-                if (transceiver.getMediaType() ==
-                        org.webrtc.MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO) {
+                if (transceiver.getMediaType() !=
+                        org.webrtc.MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO) continue;
 
-                    org.webrtc.RtpSender sender = transceiver.getSender();
-                    org.webrtc.RtpParameters params = sender.getParameters();
+                RtpSender sender = transceiver.getSender();
+                org.webrtc.RtpParameters params = sender.getParameters();
 
-                    for (org.webrtc.RtpParameters.Encoding encoding : params.encodings) {
-                        encoding.maxBitrateBps = bitrateBps;
-                    }
-                    sender.setParameters(params);
-                    Log.d(TAG, "Bitrate updated to " + bitrateBps + " bps");
-                    break;
+                // Guard: encodings is empty before negotiation completes.
+                // onConnected() will call setBitrate() again once the encoder is live.
+                if (params.encodings.isEmpty()) {
+                    Log.w(TAG, "setBitrate(" + bitrateBps
+                            + "): encodings list is empty — negotiation not complete yet, skipping");
+                    return;
                 }
+
+                for (org.webrtc.RtpParameters.Encoding enc : params.encodings) {
+                    // Set both floor and ceiling so the encoder doesn't clamp down
+                    enc.minBitrateBps = bitrateBps / 2;
+                    enc.maxBitrateBps = bitrateBps;
+                }
+
+                boolean ok = sender.setParameters(params);
+                Log.d(TAG, "setBitrate(" + bitrateBps + " bps) → setParameters=" + ok
+                        + "  encodings=" + params.encodings.size());
+                break;
             }
         } catch (Exception e) {
             Log.e(TAG, "setBitrate failed", e);
