@@ -1,12 +1,14 @@
-package com.github.nikipo.ussoi.media.h264;
+package com.github.nikipo.ussoi.media.webrtc;
+
+import com.github.nikipo.ussoi.media.utility.Resolution;
 
 /**
  * *****************************************************************************
  *
  * @author nikipo
  * *****************************************************************************
- * @file SurfaceMode
- * @date 6/15/26 2:54 PM
+ * @file webrtcConfig
+ * @date 6/15/26 7:28 PM
  * @attention Copyright (c) 2026
  * All rights reserved.
  * <p>
@@ -17,7 +19,10 @@ package com.github.nikipo.ussoi.media.h264;
  * <p>
  * *****************************************************************************
  */
-public enum SurfaceMode {
-    LQ_ONLY,
-    LQ_AND_HQ
+public class webrtcConfig {
+    public String cameraId ;
+    public Resolution streamConfig =
+            new Resolution();
+    public Resolution recordConfig =
+            new Resolution();
 }

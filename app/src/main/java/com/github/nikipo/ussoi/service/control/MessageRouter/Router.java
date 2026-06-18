@@ -1,5 +1,6 @@
 package com.github.nikipo.ussoi.service.control.MessageRouter;
 
+import static com.github.nikipo.ussoi.media.utility.HFCameraHelper.isHighSpeedSupported;
 import static com.github.nikipo.ussoi.media.utility.CameraHelper.buildAllCamerasJson;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Device_Id;
 import static com.github.nikipo.ussoi.ui.UssoiStrings.*;
@@ -8,7 +9,6 @@ import android.content.Context;
 import android.hardware.camera2.CameraManager;
 import android.util.Log;
 
-import com.github.nikipo.ussoi.media.hfh264.HighFPSCameraController;
 import com.github.nikipo.ussoi.service.control.ConnectionManager;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 import com.github.nikipo.ussoi.storage.logs.Logging;
@@ -35,7 +35,7 @@ import org.json.JSONObject;
  */
 public class Router{
     private static final String TAG = "Router";
-    private static Context ctx;
+    private static Context context;
     private StreamRoute streamRoute;
     private TunnelRoute tunnelRoute;
     private ConnectionManager connectionManager;
@@ -51,7 +51,7 @@ public class Router{
     private JSONObject camRes;
 
     public Router(ConnectionManager sender, Context context) {
-        ctx = context;
+        Router.context = context;
         connectionManager = sender;
         deviceInfoDynamic = new DeviceInfoDynamic(context);
         deviceInfoStatic = new DeviceInfoStatic(context);
@@ -65,15 +65,15 @@ public class Router{
             // TODO log
         }
 
-        logger = Logging.getInstance(ctx);
+        logger = Logging.getInstance(Router.context);
 
-        deviceId = SaveInputFields.getInstance(ctx).get_shared_pref().getString(KEY_Device_Id, EMPTY);
+        deviceId = SaveInputFields.getInstance(Router.context).get_shared_pref().getString(KEY_Device_Id, EMPTY);
 
         is_params_set = false;
         high_fps_support = hasHighFpsCamera();
 
-        tunnelRoute = new TunnelRoute(sender, this, ctx);
-        streamRoute = new StreamRoute(connectionManager, this, ctx, StreamMode.None);
+        tunnelRoute = new TunnelRoute(sender, this, Router.context);
+        streamRoute = new StreamRoute(connectionManager, this, Router.context, StreamMode.None);
     }
 
 
@@ -83,8 +83,6 @@ public class Router{
         String cmdId = json.optString(CMD_ID, EMPTY);
 
         switch (cmd) {
-
-            // ── Param commands ────────────────────────────────────────────────
             case GET_PARAMS:
                 sendParams();
                 break;
@@ -106,11 +104,11 @@ public class Router{
                 tunnelRoute.route(json);
                 break;
 
-            case STATS:
-                sendResponse(connectionManager,cmdId,cmd, deviceInfoDynamic.buildSerialPacket());
+            case DEVICE_INFO:
+                sendResponse(connectionManager,cmdId,cmd, deviceInfoDynamic.buildJsonPacket());
                 break;
 
-            case IDENTITY:
+            case DEVICE_IDENTITY:
                 sendResponse(connectionManager,cmdId,cmd, deviceInfoStatic.getAll());
                 break;
 
@@ -196,7 +194,7 @@ public class Router{
             streamRoute.closeStream();
         }
 
-        streamRoute = new StreamRoute(connectionManager, this, ctx, streamMode);
+        streamRoute = new StreamRoute(connectionManager, this, context, streamMode);
         is_params_set = true;
 
         sendResponse(connectionManager,cmdId,SET_PARAMS ,null);
@@ -207,12 +205,11 @@ public class Router{
 
     private static boolean hasHighFpsCamera() {
         try {
-            CameraManager manager = (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
+            CameraManager manager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
             if (manager == null) return false;
 
             for (String cameraId : manager.getCameraIdList()) {
-                Object caps = HighFPSCameraController.getHighSpeedCapabilities(ctx, cameraId);
-                if (caps != null) {
+                if (isHighSpeedSupported(context,cameraId)) {
                     Log.d(TAG, "High-FPS camera found: " + cameraId);
                     return true;
                 }
@@ -262,7 +259,7 @@ public class Router{
         if (streamRoute != null) streamRoute.closeStream();
     }
 
-    public char getStatusTelem() {
+    public char getTunnelAndStreamStatus() {
         int status = 0;
 
         boolean tunnelRunning =
@@ -277,12 +274,6 @@ public class Router{
         if (tunnelRunning) status |= 1;
         if (streaming)     status |= 1 << 1;
         if (recording)     status |= 1 << 2;
-
-        Log.d(TAG,
-                "TelemStatus: tunnel=" + tunnelRunning +
-                        ", streaming=" + streaming +
-                        ", recording=" + recording +
-                        ", nibble=" + Integer.toHexString(status).toUpperCase());
 
         return "0123456789ABCDEF".charAt(status & 0x0F);
     }

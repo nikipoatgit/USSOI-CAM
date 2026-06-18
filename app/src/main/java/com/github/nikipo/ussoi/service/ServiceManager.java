@@ -135,7 +135,7 @@ public class ServiceManager extends Service implements LifecycleOwner {
         logger.log(TAG + ": Service is being destroyed");
 
         if (connectionManager != null) {
-            connectionManager.stopAllServices();
+            connectionManager.close();
             connectionManager = null;
         }
 

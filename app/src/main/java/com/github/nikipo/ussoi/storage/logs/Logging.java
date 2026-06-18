@@ -79,7 +79,7 @@ public class Logging {
         }
     }
 
-    public void logCsv(String tag, Object... values) {
+    public void log(String tag, Object... values) {
         if (logExecutor.isShutdown()) return;
 
         final String ts =

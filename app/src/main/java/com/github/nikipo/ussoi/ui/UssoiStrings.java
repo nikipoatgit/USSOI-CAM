@@ -18,7 +18,7 @@ package com.github.nikipo.ussoi.ui;
  * *****************************************************************************
  */
 public class UssoiStrings {
-    public static final int TELEMETRY_INTERVAL = 3000;
+    public static final int TELEMETRY_SLEEP_INTERVAL = 3000;
     public  static final String PasswordMask = "••••••••";
     public static final String PARAMS_NOT_SET = "Params Not Set";
     public static final String UNKNOWN_CMD_TIMEOUT = "Unknown Command / Timeout";
@@ -85,8 +85,8 @@ public class UssoiStrings {
     public static final String GET_RES      = "get_res";
     public static final String GET_PARAMS   = "get_params";
 
-    public static final String TELEMETRY   = "t";
-
+    public static final String TELEMETRY   = "telem";
+    public static final String HEX   = "hex";
     // Status Values
     public static final String STATUS_OK    = "ok";
     public static final String STATUS_FAIL  = "fail";
@@ -100,8 +100,9 @@ public class UssoiStrings {
     public static final String HF_SUPPORT = "HFSupport";
     public static final String STREAM_MODE = "Stream_mode";
     public static final String PARAMS_SET = "params_set";
-    public static final String STATS = "stats";
-    public static final String IDENTITY = "identity";
+    public static final String DEVICE_IDENTITY   = "get_identity";
+    public static final String DEVICE_INFO   = "get_info";
+    public static final String STATS   = "stats";
     public static final String TELEMETRY_RATE = "Telemetry_Rate";
     public static final String PARAM = "param";
     public static final String CAM_ID = "camId";
@@ -110,5 +111,7 @@ public class UssoiStrings {
     public static final String FPS = "fps";
     public static final String BITRATE = "bitrate";
     public static final String RES = "res";
+
+    public static final String STATE = "state";
 
 }

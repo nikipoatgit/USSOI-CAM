@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
+import android.util.Log;
 import android.view.Surface;
 
 import androidx.documentfile.provider.DocumentFile;
@@ -17,12 +18,10 @@ import java.util.Date;
 import java.util.Locale;
 
 public final class LocalRecorder implements AutoCloseable {
-
+    private final String TAG = "LocalRecorder";
     private final Context context;
-
     private MediaRecorder recorder;
     private ParcelFileDescriptor pfd;
-
     private static SaveInputFields saveInputFields;
     private static SharedPreferences prefs;
     public volatile boolean isRecording = false;
@@ -42,6 +41,16 @@ public final class LocalRecorder implements AutoCloseable {
     ) throws IOException {
 
         recorder = new MediaRecorder();
+
+        recorder.setOnErrorListener((mr, what, extra) ->
+                Log.e(TAG,
+                        "MediaRecorder error what=" + what +
+                                " extra=" + extra));
+
+        recorder.setOnInfoListener((mr, what, extra) ->
+                Log.d(TAG,
+                        "MediaRecorder info what=" + what +
+                                " extra=" + extra));
 
         recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
         recorder.setAudioSource(MediaRecorder.AudioSource.MIC);

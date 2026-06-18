@@ -9,6 +9,7 @@ import static com.github.nikipo.ussoi.ui.UssoiStrings.ERROR;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.hardware.camera2.CameraAccessException;
+import android.util.Log;
 import android.util.Range;
 import android.util.Size;
 import android.view.Surface;
@@ -17,10 +18,12 @@ import com.github.nikipo.ussoi.media.Media;
 import com.github.nikipo.ussoi.media.enocders.LocalRecorder;
 import com.github.nikipo.ussoi.media.enocders.StreamingEncoder;
 import com.github.nikipo.ussoi.media.utility.CameraHelper;
+import com.github.nikipo.ussoi.media.utility.SurfaceMode;
 import com.github.nikipo.ussoi.network.Webscoket.WebSocketHandler;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 /**
  * *****************************************************************************
@@ -49,12 +52,16 @@ public class H264Media implements Media {
     private boolean initialized = false;
     private Surface LQSurface ;
     private Surface HQSurface ;
-    private SharedPreferences preferences;
     private SurfaceMode surfaceMode;
+    private String[] cameraIds ;
+    private Thread streamThread;
+    private volatile boolean streamLoop;
+    private volatile boolean streamMuted;
+    private volatile long maxUploadByteRate;
 
 
     @Override
-    public synchronized void init(Context ctx) {
+    public synchronized void init(Context ctx) throws CameraAccessException {
         if (initialized) {
             return;
         }
@@ -62,11 +69,9 @@ public class H264Media implements Media {
         h264Config = new H264Config();
         h264Config.recordingConfig.bitrate = 1_000_000*8;  // 1MBps
         h264Config.streamConfig.bitrate = 50_000*8; // 50KBps
-        try{
-            h264Config.cameraId = CameraHelper.getCameraIdList(context)[0];
-        } catch (CameraAccessException e) {
-            return;
-        }
+        maxUploadByteRate = 50_000*3;
+        cameraIds= CameraHelper.getCameraIdList(context);
+        h264Config.cameraId = cameraIds[0];
 
         surfaceMode = SurfaceMode.LQ_ONLY;
 
@@ -101,7 +106,7 @@ public class H264Media implements Media {
                 }
         );
 
-        preferences = SaveInputFields.getInstance(context).get_shared_pref();
+        SharedPreferences preferences = SaveInputFields.getInstance(context).get_shared_pref();
 
         websocket.setupConnection(KEY_stream_api_path,preferences.getString(KEY_Session_KEY,ERROR));
 
@@ -110,10 +115,10 @@ public class H264Media implements Media {
 
     @Override
     public void close() {
-        stopCamera();
-        stopStream();
         stopRecorder();
+        stopStream();
         stopWebSocket();
+        initialized = false;
     }
 
     @Override
@@ -121,14 +126,14 @@ public class H264Media implements Media {
         if (!initialized) {
             throw new IllegalStateException("Media not initialized");
         }
-        if (streamEncoder != null){
+        if (IsStreaming()){
             throw new IllegalStateException("Stream Already Running");
         }
         if (h264Config.streamConfig.res == null){
             throw new IllegalStateException("Stream Resolution not set");
         }
-        if (recorder != null){
-            throw new IllegalStateException("Recording Active");
+        if (IsRecording()){
+            throw new IllegalStateException("Can't Recording Active");
         }
         if (!checkForExactSupportedResolution(
                 context,
@@ -136,14 +141,14 @@ public class H264Media implements Media {
                 h264Config.streamConfig.res.getWidth(),
                 h264Config.streamConfig.res.getHeight(),
                 h264Config.streamConfig.fpsRange
-        )){
-            throw new IllegalStateException("Resolution Incapable with Camera");
+        )) {
+            throw new IllegalStateException("Resolution not supported by camera");
         }
         // all checks done
-        startEncoder();
-
         try {
+            startEncoder();
             startCamera();
+            SetStreamBitrate(h264Config.streamConfig.bitrate);// most times encoder ignores set bitrate cause res is high and bitrate is low mere 50KBps
         } catch (Exception e) {
             stopCamera();
             stopEncoder();
@@ -179,11 +184,24 @@ public class H264Media implements Media {
         }
         h264Config.streamConfig.res =new Size(width, height);
         h264Config.streamConfig.fpsRange = fpsRange;
+
+
+        boolean wasStreaming = IsStreaming();
+        stopStream();
+        try {
+            if (wasStreaming) {
+                StartStream();
+            }
+        } catch (Exception e) {
+            stopStream();
+            throw e;
+        }
     }
 
     @Override
     public void SetStreamBitrate(int bitrate) {
         h264Config.streamConfig.bitrate = bitrate;
+        maxUploadByteRate = (bitrate/8)*3;
         if(streamEncoder != null) {
             streamEncoder.setBitrate(h264Config.streamConfig.bitrate);
         }
@@ -199,19 +217,74 @@ public class H264Media implements Media {
 
     @Override
     public void StreamMute(boolean mute) {
-        throw new IllegalStateException("Functionality Unavailable");
+        if (!IsStreaming()) {
+            throw new IllegalStateException("Not Streaming");
+        }
+        streamMuted = mute;
     }
-
     @Override
     public void StartRecording() {
-        if (streamEncoder != null){
-            throw new IllegalStateException("Star");
+        if (IsRecording()) throw new IllegalStateException("Recording Already Active");
+        if (!IsStreaming()) throw new IllegalStateException("Start Stream first");
+        if (h264Config.recordingConfig.res == null) throw new IllegalStateException("Set Record Res first");
+        if (!checkForExactSupportedResolution(
+                context,
+                h264Config.cameraId,
+                h264Config.recordingConfig.res.getWidth(),
+                h264Config.recordingConfig.res.getHeight(),
+                h264Config.recordingConfig.fpsRange
+        )) {
+            throw new IllegalStateException("Resolution not supported by camera");
         }
-        if (h264Config.recordingConfig.res == null) throw new IllegalStateException("Stream Res Null")
+
+        try {
+            stopStream();
+
+            surfaceMode = SurfaceMode.LQ_AND_HQ;
+            startRecorder();
+
+            if (!checkForExactSupportedResolution(
+                    context,
+                    h264Config.cameraId,
+                    h264Config.streamConfig.res.getWidth(),
+                    h264Config.streamConfig.res.getHeight(),
+                    h264Config.streamConfig.fpsRange
+            )) {
+                throw new IllegalStateException("Resolution not supported by camera");
+            }
+
+            try {
+                startEncoder();
+                startCamera();
+                SetStreamBitrate(h264Config.streamConfig.bitrate);// most times encoder ignores set bitrate cause res is high and bitrate is low mere 50KBps
+            } catch (Exception e) {
+                stopCamera();
+                stopEncoder();
+                throw e;
+            }
+        } catch (Exception e) {
+            stopRecorder();
+            throw e;
+        }
+
+
     }
 
     @Override
     public void SetRecordingResolution(int width, int height, int fps) {
+        if (IsRecording()) throw new IllegalStateException("Can't Recording Active");
+        Range<Integer> fpsRange = getOptimalFpsRange(context,h264Config.cameraId,fps);
+        if (!checkForExactSupportedResolution(
+                context,
+                h264Config.cameraId,
+                width,
+                height,
+                fpsRange
+        )) {
+            throw new IllegalStateException("Resolution not supported by camera");
+        }
+        h264Config.recordingConfig.res =new Size(width, height);
+        h264Config.recordingConfig.fpsRange = fpsRange;
     }
 
     @Override
@@ -232,10 +305,30 @@ public class H264Media implements Media {
 
     @Override
     public void StopRecording() {
+        stopRecorder();
+        stopStream();
+        surfaceMode = SurfaceMode.LQ_ONLY;
     }
 
     @Override
     public void SwitchCamera(int camId) {
+        if (recorder != null) {
+            throw new IllegalStateException("Recording Active");
+        }
+
+        if (camId < 0 || camId >= cameraIds.length) {
+            throw new IllegalStateException("CamId Invalid");
+        }
+
+        boolean wasStreaming = IsStreaming();
+
+        stopStream();
+
+        h264Config.cameraId = cameraIds[camId];
+
+        if (wasStreaming) {
+            StartStream();
+        }
     }
 
     @Override
@@ -256,17 +349,34 @@ public class H264Media implements Media {
     private void startEncoder(){
         streamEncoder = new StreamingEncoder();
         try {
+
+//            Log.d(
+//                    TAG,
+//                    String.format(
+//                            "Encoder config: %dx%d @ %dfps, bitrate=%d",
+//                            h264Config.streamConfig.res.getWidth(),
+//                            h264Config.streamConfig.res.getHeight(),
+//                            h264Config.streamConfig.fpsRange.getUpper(),
+//                            h264Config.streamConfig.bitrate
+//                    )
+//            );
+
             LQSurface = streamEncoder.prepare(
                     h264Config.streamConfig.res.getWidth(),
                     h264Config.streamConfig.res.getHeight(),
                     h264Config.streamConfig.fpsRange.getUpper(),
                     h264Config.streamConfig.bitrate
             );
+
+            streamEncoder.start();
+            startStreamLoop();
         } catch (IOException e) {
             throw new IllegalStateException("StreamEncoder IOException");
         }
     }
     private void stopEncoder(){
+        stopStreamLoop();
+
         if (streamEncoder != null){
             streamEncoder.close();
         }
@@ -274,18 +384,23 @@ public class H264Media implements Media {
     }
 
     private void startCamera(){
+        Log.d(TAG,
+                "startCamera() " +
+                        "surfaceMode=" + surfaceMode +
+                        ", cameraId=" + h264Config.cameraId);
+
         if (camera != null){
             stopCamera();
         }
-        if(sm == SurfaceMode.LQ_ONLY){
+        if(surfaceMode == SurfaceMode.LQ_ONLY){
             if (LQSurface == null || !LQSurface.isValid()) throw new IllegalStateException("Invalid LQSurface");
-            camera = new CameraController(context,sm);
+            camera = new CameraController(context,surfaceMode);
             camera.setLQSurface(LQSurface);
             camera.start(h264Config.cameraId,h264Config.streamConfig.fpsRange);
         }
         else{
             if (HQSurface == null || !HQSurface.isValid()) throw new IllegalStateException("Invalid HQSurface");
-            camera = new CameraController(context,sm);
+            camera = new CameraController(context,surfaceMode);
             camera.setLQSurface(LQSurface);
             camera.setHQSurface(HQSurface);
             Range<Integer> required =
@@ -302,9 +417,13 @@ public class H264Media implements Media {
 
     }
     private void stopCamera(){
-        if(camera != null){
-            camera.stop();
-            camera = null;
+        try {
+            if (camera != null) {
+                camera.stop();
+                camera = null;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -318,6 +437,7 @@ public class H264Media implements Media {
                     h264Config.recordingConfig.fpsRange.getUpper(),
                     h264Config.recordingConfig.bitrate
             );
+            recorder.start();
         } catch (IOException e) {
             throw new IllegalStateException("recorder IOException");
         }
@@ -328,5 +448,69 @@ public class H264Media implements Media {
             recorder.close();
         }
         recorder = null;
+    }
+
+    private void startStreamLoop() {
+
+        streamLoop = true;
+
+        streamThread = new Thread(() -> {
+
+            while (streamLoop) {
+
+                StreamingEncoder.EncodedFrame frame = streamEncoder.dequeue();
+
+                if (frame == null || streamMuted) {
+                    continue;
+                }
+                byte[] packet = buildPacket(frame);
+                if(websocket != null && websocket.getPendingBytes() < maxUploadByteRate) {
+                    websocket.sendBytes(packet);
+                }
+            }
+
+        }, "H264-Drain");
+
+        streamThread.start();
+    }
+
+    private byte[] buildPacket(StreamingEncoder.EncodedFrame frame) {
+
+        ByteBuffer src = frame.data.duplicate();
+        int payloadSize = src.remaining();
+
+        byte[] packet = new byte[9 + payloadSize];
+
+        long captureMs = System.currentTimeMillis();
+
+        packet[0] = (byte) (frame.keyFrame ? 1 : 0);
+
+        packet[1] = (byte) (captureMs >>> 56);
+        packet[2] = (byte) (captureMs >>> 48);
+        packet[3] = (byte) (captureMs >>> 40);
+        packet[4] = (byte) (captureMs >>> 32);
+        packet[5] = (byte) (captureMs >>> 24);
+        packet[6] = (byte) (captureMs >>> 16);
+        packet[7] = (byte) (captureMs >>> 8);
+        packet[8] = (byte) captureMs;
+
+        src.get(packet, 9, payloadSize);
+
+        return packet;
+    }
+
+
+    private void stopStreamLoop() {
+
+        streamLoop = false;
+
+        if (streamThread != null) {
+            try {
+                streamThread.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            streamThread = null;
+        }
     }
 }

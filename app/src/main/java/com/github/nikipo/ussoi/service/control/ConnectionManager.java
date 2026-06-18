@@ -1,6 +1,11 @@
 package com.github.nikipo.ussoi.service.control;
 
-import static com.github.nikipo.ussoi.ui.UssoiStrings.TELEMETRY_INTERVAL;
+import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Session_KEY;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.CMD;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.HEX;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.TELEMETRY;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.TELEMETRY_SLEEP_INTERVAL;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.TYPE;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -30,7 +35,6 @@ public class ConnectionManager {
     private SaveInputFields saveInputFields;
     private Logging logger;
     private Router router;
-    static final String KEY_Session_KEY = "sessionKey";
 
     private ConnectionManager(Context ctx, String url) {
         this.context = ctx.getApplicationContext();
@@ -42,15 +46,12 @@ public class ConnectionManager {
 
         router= new Router(this,context);
     }
-
     public static ConnectionManager getInstance(Context ctx, String url){
         if (instance == null){
            instance = new ConnectionManager(ctx,url);
         }
         return instance;
     }
-
-
     public WebSocketHandler getWebSocketHandlerObject() {
         return webSocketHandler;
     }
@@ -93,7 +94,7 @@ public class ConnectionManager {
             public void onClosed() {
                 logger.log(TAG + ": WS Closed");
                 if (impClientInfoSender != null) {
-                    impClientInfoSender.stopSending();
+                    impClientInfoSender.close();
                 }
             }
 
@@ -102,7 +103,7 @@ public class ConnectionManager {
                 logger.log(TAG + ": WS Error" + error);
             }
         });
-        webSocketHandler.setupConnection(wsUrl, prefs.getString(KEY_Session_KEY, "block"));
+        webSocketHandler.setupConnection(wsUrl, prefs.getString(KEY_Session_KEY, ""));
     }
 
     public void send(JSONObject obj) {
@@ -112,13 +113,13 @@ public class ConnectionManager {
         }
     }
 
-    private char getStatusTelem() {
-        return router.getStatusTelem();
+    private char getTunnelAndStreamStatus() {
+        return router.getTunnelAndStreamStatus();
     }
 
-    public void stopAllServices() {
+    public void close() {
         if (impClientInfoSender != null) {
-            impClientInfoSender.stopSending();
+            impClientInfoSender.close();
             impClientInfoSender = null;
         }
 
@@ -128,7 +129,7 @@ public class ConnectionManager {
         }
 
         if (sysTelemetry != null) {
-            sysTelemetry.stopMonitoring();
+            sysTelemetry.close();
         }
 
         router.stop();
@@ -161,20 +162,18 @@ public class ConnectionManager {
                         WebSocketHandler handler = webSocketHandler;
 
                         if (handler == null || !handler.isConnected()) {
-                            Thread.sleep(UssoiStrings.TELEMETRY_INTERVAL);
+                            Thread.sleep(UssoiStrings.TELEMETRY_SLEEP_INTERVAL);
                             continue;
                         }
 
                         // Build combined status object
                         JSONObject obj = new JSONObject();
-                        obj.put("type", "telem");
-                        obj.put("cmd", "telem");
-                        obj.put("hex", telemetry.getPacket() + sender.getStatusTelem());
-
-                        Log.d(TAG, "Telemetry TX = " + obj);
+                        obj.put(TYPE, TELEMETRY);
+                        obj.put(CMD, TELEMETRY);
+                        obj.put(HEX, telemetry.getPacket() + sender.getTunnelAndStreamStatus());
 
                         sender.send(obj);
-                        Thread.sleep(TELEMETRY_INTERVAL);
+                        Thread.sleep(TELEMETRY_SLEEP_INTERVAL);
 
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
@@ -187,7 +186,7 @@ public class ConnectionManager {
             worker.start();
         }
 
-        public synchronized void stopSending() {
+        public synchronized void close() {
             running = false;
             if (worker != null) {
                 worker.interrupt();

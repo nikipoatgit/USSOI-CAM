@@ -1,6 +1,8 @@
 package com.github.nikipo.ussoi.media.webrtc;
 
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import org.json.JSONObject;
@@ -15,6 +17,7 @@ import org.webrtc.MediaConstraints;
 import org.webrtc.MediaStream;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
+import org.webrtc.RTCStats;
 import org.webrtc.RtpReceiver;
 import org.webrtc.RtpSender;
 import org.webrtc.RtpTransceiver;
@@ -23,6 +26,7 @@ import org.webrtc.SessionDescription;
 import org.webrtc.SurfaceTextureHelper;
 import org.webrtc.VideoCapturer;
 import org.webrtc.VideoFrame;
+import org.webrtc.VideoSink;
 import org.webrtc.VideoSource;
 import org.webrtc.VideoTrack;
 
@@ -70,6 +74,9 @@ public final class WebRtcPeerConnection {
         void onError(String message);
     }
 
+    private final Handler statsHandler = new Handler(Looper.getMainLooper());
+
+
     // -------------------------------------------------------------------------
     // Factory — initialized once per process
     // -------------------------------------------------------------------------
@@ -83,6 +90,7 @@ public final class WebRtcPeerConnection {
      */
     public static synchronized void initializeFactory(Context context) {
         if (factory != null) return;
+
 
         PeerConnectionFactory.initialize(
                 PeerConnectionFactory.InitializationOptions
@@ -133,7 +141,7 @@ public final class WebRtcPeerConnection {
      * Each frame has its rotation metadata rewritten before being forwarded — zero
      * pixel-data copy, just a wrapper VideoFrame object.
      */
-    private org.webrtc.VideoSink rotatingSink;
+    private VideoSink rotatingSink;
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -142,6 +150,27 @@ public final class WebRtcPeerConnection {
     public WebRtcPeerConnection(Context context, Callback callback) {
         this.context  = context.getApplicationContext();
         this.callback = callback;
+
+        Runnable statsTask = new Runnable() {
+            @Override
+            public void run() {
+
+                if (peerConnection != null) {
+                    peerConnection.getStats(report -> {
+                        for (RTCStats s : report.getStatsMap().values()) {
+
+                            if (!"outbound-rtp".equals(s.getType()))
+                                continue;
+
+                            Log.d("WEBRTC-STATS", s.getMembers().toString());
+                        }
+                    });
+                }
+
+                statsHandler.postDelayed(this, 5000);
+            }
+        };
+        statsHandler.post(statsTask);
     }
 
     // -------------------------------------------------------------------------
@@ -223,14 +252,7 @@ public final class WebRtcPeerConnection {
         return surfaceTextureHelper;
     }
 
-    /**
-     * Returns a {@link org.webrtc.VideoCapturer.CapturerObserver} that wraps the
-     * real video-source observer with rotation metadata injection.
-     *
-     * <p>Pass this to {@link org.webrtc.Camera2Capturer#initialize} instead of
-     * {@code videoSource.getCapturerObserver()} so every frame is stamped with the
-     * current {@link #frameRotation} before reaching the encoder.
-     */
+
     public org.webrtc.CapturerObserver getRotatingCapturerObserver() {
         return new org.webrtc.CapturerObserver() {
             @Override
@@ -243,13 +265,20 @@ public final class WebRtcPeerConnection {
             }
             @Override
             public void onFrameCaptured(org.webrtc.VideoFrame frame) {
+
                 int rot = frameRotation;
                 if (rot != 0) {
+                    // 1. Retain the buffer because 'rotated' is taking shared ownership of it
+                    frame.getBuffer().retain();
+
                     org.webrtc.VideoFrame rotated = new org.webrtc.VideoFrame(
                             frame.getBuffer(),
                             (frame.getRotation() + rot) % 360,
                             frame.getTimestampNs());
+
                     videoSource.getCapturerObserver().onFrameCaptured(rotated);
+
+                    // 2. This safely releases the wrapper structure and decrements the buffer count
                     rotated.release();
                 } else {
                     videoSource.getCapturerObserver().onFrameCaptured(frame);
@@ -257,6 +286,7 @@ public final class WebRtcPeerConnection {
             }
         };
     }
+
 
     /**
      * Updates the rotation (degrees) stamped on every outgoing video frame.
@@ -268,6 +298,10 @@ public final class WebRtcPeerConnection {
     public void setFrameRotation(int degrees) {
         this.frameRotation = degrees;
         Log.d(TAG, "frameRotation set to " + degrees + "°");
+    }
+
+    public int getFrameRotation() {
+        return frameRotation;
     }
 
     /** Releases all WebRTC resources. Safe to call multiple times. */
@@ -393,28 +427,7 @@ public final class WebRtcPeerConnection {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Runtime control
-    // -------------------------------------------------------------------------
 
-    /**
-     * Dynamically adjusts the video encoding bitrate via RTP sender parameters.
-     *
-     * <p><b>Root-cause note:</b> {@code getParameters()} returns an object whose
-     * {@code encodings} list is <em>empty</em> until ICE + DTLS negotiation has
-     * completed and the encoder is running. Calling {@code setParameters()} with an
-     * empty list silently succeeds but changes nothing. The guard below logs a
-     * warning and bails out in that case; the bitrate is stored in
-     * {@link WebRtcMedia#streamBitrateBps} and re-applied by
-     * {@link WebRtcMedia.peerConnectionCallback#onConnected()} once the connection
-     * is fully established.
-     *
-     * <p>Both {@code minBitrateBps} and {@code maxBitrateBps} are set — omitting
-     * the minimum allows the encoder to clamp the bitrate to its own floor, which
-     * can make a high {@code maxBitrateBps} appear to have no effect.
-     *
-     * @param bitrateBps Target bitrate in bits per second.
-     */
     public synchronized void setBitrate(int bitrateBps) {
         if (peerConnection == null) return;
         try {
@@ -425,8 +438,7 @@ public final class WebRtcPeerConnection {
                 RtpSender sender = transceiver.getSender();
                 org.webrtc.RtpParameters params = sender.getParameters();
 
-                // Guard: encodings is empty before negotiation completes.
-                // onConnected() will call setBitrate() again once the encoder is live.
+
                 if (params.encodings.isEmpty()) {
                     Log.w(TAG, "setBitrate(" + bitrateBps
                             + "): encodings list is empty — negotiation not complete yet, skipping");
@@ -530,7 +542,9 @@ public final class WebRtcPeerConnection {
 
                 @Override
                 public void onConnectionChange(PeerConnection.PeerConnectionState state) {
-                    Log.d(TAG, "Connection state: " + state);
+
+                    Log.d("WebRtcPeerConn", "Connection state: " + state);
+
                     switch (state) {
                         case CONNECTED:
                             callback.onConnected();
