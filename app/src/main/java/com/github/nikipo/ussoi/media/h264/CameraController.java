@@ -12,6 +12,8 @@ import android.view.Surface;
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
 
+import com.github.nikipo.ussoi.media.utility.SurfaceMode;
+
 import java.util.Arrays;
 
 public final class CameraController {
@@ -31,6 +33,8 @@ public final class CameraController {
 
     private final SurfaceMode surfaceMode;
 
+    private volatile boolean closed = true;
+
     public CameraController(
             Context context,
             SurfaceMode surfaceMode
@@ -38,6 +42,7 @@ public final class CameraController {
         this.context = context.getApplicationContext();
         this.surfaceMode = surfaceMode;
     }
+
     public synchronized void setHQSurface(Surface surface) {
         hqSurface = surface;
     }
@@ -51,6 +56,7 @@ public final class CameraController {
             Range<Integer> fpsRange
     ) {
 
+        closed = false;
         this.fpsRange = fpsRange;
 
         startThread();
@@ -65,16 +71,13 @@ public final class CameraController {
                 cameraId = manager.getCameraIdList()[0];
             }
 
-            if (ActivityCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-                // TODO: Consider calling
-                //    ActivityCompat#requestPermissions
-                // here to request the missing permissions, and then overriding
-                //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                //                                          int[] grantResults)
-                // to handle the case where the user grants the permission. See the documentation
-                // for ActivityCompat#requestPermissions for more details.
+            if (ActivityCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.CAMERA
+            ) != PackageManager.PERMISSION_GRANTED) {
                 return;
             }
+
             manager.openCamera(
                     cameraId,
                     cameraCallback,
@@ -82,6 +85,13 @@ public final class CameraController {
             );
 
         } catch (Exception e) {
+
+            try {
+                stop();
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+
             throw new RuntimeException(e);
         }
     }
@@ -91,7 +101,13 @@ public final class CameraController {
 
                 @Override
                 public void onOpened(
-                        @NonNull CameraDevice camera) {
+                        @NonNull CameraDevice camera
+                ) {
+
+                    if (closed) {
+                        camera.close();
+                        return;
+                    }
 
                     cameraDevice = camera;
                     createSession();
@@ -99,21 +115,45 @@ public final class CameraController {
 
                 @Override
                 public void onDisconnected(
-                        @NonNull CameraDevice camera) {
+                        @NonNull CameraDevice camera
+                ) {
 
-                    stop();
+                    closed = true;
+
+                    camera.close();
+
+                    if (session != null) {
+                        session.close();
+                        session = null;
+                    }
+
+                    cameraDevice = null;
                 }
 
                 @Override
                 public void onError(
                         @NonNull CameraDevice camera,
-                        int error) {
+                        int error
+                ) {
 
-                    stop();
+                    closed = true;
+
+                    camera.close();
+
+                    if (session != null) {
+                        session.close();
+                        session = null;
+                    }
+
+                    cameraDevice = null;
                 }
             };
 
     private void createSession() {
+
+        if (closed || cameraDevice == null) {
+            return;
+        }
 
         try {
 
@@ -147,7 +187,13 @@ public final class CameraController {
 
                 @Override
                 public void onConfigured(
-                        @NonNull CameraCaptureSession s) {
+                        @NonNull CameraCaptureSession s
+                ) {
+
+                    if (closed) {
+                        s.close();
+                        return;
+                    }
 
                     session = s;
 
@@ -155,17 +201,20 @@ public final class CameraController {
 
                         CaptureRequest.Builder builder =
                                 cameraDevice.createCaptureRequest(
-                                        CameraDevice.TEMPLATE_RECORD);
+                                        CameraDevice.TEMPLATE_RECORD
+                                );
 
                         builder.addTarget(lqSurface);
 
-                        if (surfaceMode == SurfaceMode.LQ_AND_HQ) {
+                        if (surfaceMode ==
+                                SurfaceMode.LQ_AND_HQ) {
                             builder.addTarget(hqSurface);
                         }
 
                         builder.set(
                                 CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                                fpsRange);
+                                fpsRange
+                        );
 
                         session.setRepeatingRequest(
                                 builder.build(),
@@ -174,18 +223,34 @@ public final class CameraController {
                         );
 
                     } catch (CameraAccessException e) {
+
+                        try {
+                            stop();
+                        } catch (InterruptedException ex) {
+                            Thread.currentThread().interrupt();
+                        }
+
                         throw new RuntimeException(e);
                     }
                 }
 
                 @Override
                 public void onConfigureFailed(
-                        @NonNull CameraCaptureSession session) {
+                        @NonNull CameraCaptureSession session
+                ) {
 
+                    session.close();
                 }
             };
 
-    public synchronized void stop() {
+    public synchronized void stop()
+            throws InterruptedException {
+
+        if (closed) {
+            return;
+        }
+
+        closed = true;
 
         if (session != null) {
             session.close();
@@ -198,7 +263,13 @@ public final class CameraController {
         }
 
         if (cameraThread != null) {
+
             cameraThread.quitSafely();
+
+            if (Thread.currentThread() != cameraThread) {
+                cameraThread.join();
+            }
+
             cameraThread = null;
             cameraHandler = null;
         }

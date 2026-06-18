@@ -102,7 +102,7 @@ public class SysTelemetry {
      * Stops all listeners and frees resources.
      * Safe to call from any thread.
      */
-    public synchronized void stopMonitoring() {
+    public synchronized void close() {
         if (!monitoring) return;
         location.stopUpdates();
         signalStrength.stopListening();

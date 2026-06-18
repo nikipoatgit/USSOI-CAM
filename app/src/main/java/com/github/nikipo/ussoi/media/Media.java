@@ -1,6 +1,7 @@
 package com.github.nikipo.ussoi.media;
 
 import android.content.Context;
+import android.hardware.camera2.CameraAccessException;
 
 /**
  * *****************************************************************************
@@ -20,7 +21,7 @@ import android.content.Context;
  */
 public interface Media {
     // Must be called before any other API.
-    void init(Context ctx);
+    void init(Context ctx) throws CameraAccessException;
 
     // Safe to call multiple times.
     void close();
