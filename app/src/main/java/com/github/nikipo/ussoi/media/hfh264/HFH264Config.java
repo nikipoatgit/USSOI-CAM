@@ -22,11 +22,9 @@ import android.util.Size;
  */
 public class HFH264Config {
     public Size res;
-    public Size resStream;
     public Range<Integer> fpsRange;
-    public int fps;
-    public int skipCount;
+    public int streamFps;
     public String cameraId;
     public int hqBitrate;
-    public int lqBitrate;
+    public int streamJpegQuality;
 }

@@ -25,9 +25,11 @@ public final class LocalRecorder implements AutoCloseable {
     private static SaveInputFields saveInputFields;
     private static SharedPreferences prefs;
     public volatile boolean isRecording = false;
+    private String HeaderName;
 
-    public LocalRecorder(Context ctx) {
+    public LocalRecorder(Context ctx,String HeaderName) {
         this.context = ctx.getApplicationContext();
+        this.HeaderName = HeaderName;
 
         saveInputFields = SaveInputFields.getInstance(ctx);
         prefs = saveInputFields.get_shared_pref();
@@ -41,16 +43,16 @@ public final class LocalRecorder implements AutoCloseable {
     ) throws IOException {
 
         recorder = new MediaRecorder();
-
-        recorder.setOnErrorListener((mr, what, extra) ->
-                Log.e(TAG,
-                        "MediaRecorder error what=" + what +
-                                " extra=" + extra));
-
-        recorder.setOnInfoListener((mr, what, extra) ->
-                Log.d(TAG,
-                        "MediaRecorder info what=" + what +
-                                " extra=" + extra));
+//
+//        recorder.setOnErrorListener((mr, what, extra) ->
+//                Log.e(TAG,
+//                        "MediaRecorder error what=" + what +
+//                                " extra=" + extra));
+//
+//        recorder.setOnInfoListener((mr, what, extra) ->
+//                Log.d(TAG,
+//                        "MediaRecorder info what=" + what +
+//                                " extra=" + extra));
 
         recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
         recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
@@ -165,7 +167,7 @@ public final class LocalRecorder implements AutoCloseable {
                 new SimpleDateFormat("ss.SSS", Locale.US)
                         .format(now);
 
-        return "H264__"
+        return HeaderName +"__"
                 + timePart
                 + "__"
                 + datePart

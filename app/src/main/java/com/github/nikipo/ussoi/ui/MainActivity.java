@@ -1,7 +1,6 @@
 package com.github.nikipo.ussoi.ui;
 
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_BT_SWITCH;
-import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Device_Id;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_device_name;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_url;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_USB_Switch;
@@ -18,6 +17,7 @@ import android.hardware.usb.UsbDevice;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.TextureView;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
@@ -61,7 +61,7 @@ public class MainActivity extends AppCompatActivity {
     private SaveInputFields saveInputFields;
     private Logging logging;
     private SharedPreferences pref;
-
+    public static TextureView textureView;
     // UI Components
     private TextView usbInfoText, versionTextField;
     private EditText urlIp, roomId, roomPwd,deviceName;
@@ -194,6 +194,11 @@ public class MainActivity extends AppCompatActivity {
         connectionToggleGroup = findViewById(R.id.connectionToggle);
         btnKeepScreenOn = findViewById(R.id.btnKeepScreenOn);
         versionTextField = findViewById(R.id.versionText);
+        textureView = findViewById(R.id.dummy_camera_preview);
+    }
+
+    public static TextureView getTextureView(){
+        return textureView;
     }
 
     @OptIn(markerClass = UnstableApi.class)

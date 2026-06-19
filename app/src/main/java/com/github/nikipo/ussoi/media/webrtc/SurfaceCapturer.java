@@ -36,7 +36,7 @@ public class SurfaceCapturer implements VideoCapturer {
     private static final String TAG = "SurfaceCapturer";
 
     private final Context context;
-    private final String cameraId;
+    private String cameraId;
     private Range<Integer> fpsRange;
 
     private CameraController cameraController;
@@ -128,6 +128,21 @@ public class SurfaceCapturer implements VideoCapturer {
         }).start();
     }
 
+    public synchronized void switchCamera(String newCameraId,
+                                          int width,
+                                          int height) {
+        try {
+            releaseCameraPipeline();
+
+            cameraId = newCameraId;
+            fpsRange = getOptimalFpsRange(context, cameraId, fpsRange.getUpper());
+
+            setupCameraPipeline(width, height);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     /**
      * Configures the texture dimensions natively inverted (height, width) to
      * align with physical camera hardware sensors and boots the engine.
@@ -147,6 +162,9 @@ public class SurfaceCapturer implements VideoCapturer {
 
         cameraController = new CameraController(context, surfaceMode);
         cameraController.setLQSurface(lqSurface);
+        if (surfaceMode == SurfaceMode.LQ_AND_HQ && hqSurface != null) {
+            cameraController.setHQSurface(hqSurface);
+        }
         cameraController.start(cameraId, fpsRange);
     }
 
@@ -162,6 +180,10 @@ public class SurfaceCapturer implements VideoCapturer {
         if (lqSurface != null) {
             lqSurface.release();
             lqSurface = null;
+        }
+
+        if (surfaceMode == SurfaceMode.LQ_ONLY) {
+            hqSurface = null;
         }
     }
 

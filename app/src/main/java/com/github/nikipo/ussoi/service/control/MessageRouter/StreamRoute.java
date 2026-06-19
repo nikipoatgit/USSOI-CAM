@@ -218,7 +218,7 @@ public class StreamRoute  {
 
                         int bitrate = param.optInt(BITRATE, -1);
 
-                        if (bitrate < 100) {
+                        if (bitrate < 1) {
                             router.sendError(connectionManager, cmdId, cmd, "Invalid Stream Bitrate");
                             break;
                         }
