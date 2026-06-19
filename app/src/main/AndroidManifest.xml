@@ -77,7 +77,7 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Ussoi">
         <activity
-            android:name=".MainActivity"
+            android:name=".ui.MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -86,13 +86,13 @@
         </activity>
 
         <service
-            android:name=".ServiceManager"
+            android:name=".service.ServiceManager"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="camera|dataSync|connectedDevice|location" />
 
         <receiver
-            android:name=".MacroServices.UsbAttachReceiver"
+            android:name=".hardware.usb.UsbAttachReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />

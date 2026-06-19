@@ -5,8 +5,8 @@ USSOI-CAM is Android application that transforms mobile devices into (telemetry)
 
 ## The Back Story (why I built this)
  Digital FPV cameras + radio kits easily run **$150–300** — way too much for pocket money. 
- 
-but a cheap second-hand Android - (Android 7+) around **₹2000–5000** (~$25–45) will do the job with added benifits of : **state-of-the-art camera** (whose full API is usually hidden behind NDAs), built-in GPS, actually-good cellular/WiFi modem, and enough processing power to handle real-time streaming + telemetry forwarding.
+
+but a cheap second-hand Android - (Android 7+) for like **₹1500–2500** (~$20–30). **state-of-the-art camera** (whose full API is usually hidden behind NDAs), built-in GPS, actually-good cellular/WiFi modem, and enough processing power to handle real-time streaming + telemetry forwarding.
 
 **Key Capabilities:**
 - Ability to target very low Android API levels for fine-grained control (also a reason of crashes and undefined behavior)
@@ -27,8 +27,8 @@ but a cheap second-hand Android - (Android 7+) around **₹2000–5000** (~$25�
   - [Communication (websocket)](#communication-hub)
   - [Client Status / Details](#client-status)
   - [Video Streaming](#video-streaming)
-  - [UI & Configuration](#ui-configuration)
-- [Request–Response Format](#Request–Response-Format)
+  - [UI & Configuration](#ui-&-configuration)
+- [Request–Response Format](#request–response-format)
 - [Data Flow](#Data-Flow)
 - [Error Handling And Edge Cases](#Error-Handling-And-Edge-Cases)
 - [Security Considerations](#Security-Considerations)
