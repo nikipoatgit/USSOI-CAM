@@ -6,6 +6,7 @@ import static com.github.nikipo.ussoi.ui.UssoiStrings.CMD;
 import static com.github.nikipo.ussoi.ui.UssoiStrings.CMD_ID;
 import static com.github.nikipo.ussoi.ui.UssoiStrings.DATA;
 import static com.github.nikipo.ussoi.ui.UssoiStrings.RESPONSE;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.STREAM_WEBRTC;
 import static com.github.nikipo.ussoi.ui.UssoiStrings.TYPE;
 import static com.github.nikipo.ussoi.ui.UssoiStrings.WEBRTC_ICE;
 import static com.github.nikipo.ussoi.ui.UssoiStrings.WEBRTC_SDP;
@@ -136,7 +137,7 @@ public class WebRtcMedia implements Media {
                 webrtcConfig.streamConfig.res.getWidth(),
                 webrtcConfig.streamConfig.res.getHeight(),
                 webrtcConfig.streamConfig.fpsRange
-                )) {
+        )) {
             throw new IllegalStateException("Resolution not supported by camera");
         }
 
@@ -218,13 +219,19 @@ public class WebRtcMedia implements Media {
             throw new IllegalStateException("Resolution not supported by camera");
         }
 
+        try {
+            startRecorder();
+        } catch (Exception e) {
+            stopRecorder();
+            throw new IllegalStateException(e.getMessage());
+        }
     }
 
 
     private void startRecorder(){
         if (recorder != null) throw new IllegalStateException("Recording Already Active");
         try {
-            recorder = new LocalRecorder(context);
+            recorder = new LocalRecorder(context,STREAM_WEBRTC);
             Surface hqSurface;
             hqSurface = recorder.prepare(
                     webrtcConfig.recordConfig.res.getWidth(),
@@ -234,13 +241,11 @@ public class WebRtcMedia implements Media {
             );
             if(!hqSurface.isValid()) throw new IllegalStateException("Invalid HQSurface");
 
-            surfaceCapturer.setSurfaceMode(SurfaceMode.LQ_AND_HQ);
-
-            surfaceCapturer.setHqSurface(hqSurface);
-            recorder.start();
-
             if (surfaceCapturer == null) throw new IllegalStateException("CameraCapture Null");
+            surfaceCapturer.setSurfaceMode(SurfaceMode.LQ_AND_HQ);
+            surfaceCapturer.setHqSurface(hqSurface);
 
+            recorder.start();
             surfaceCapturer.changeCaptureFormat(
                     webrtcConfig.recordConfig.res.getWidth(),
                     webrtcConfig.recordConfig.res.getHeight(),
@@ -254,35 +259,56 @@ public class WebRtcMedia implements Media {
     }
 
     private void stopRecorder(){
-        surfaceCapturer.setSurfaceMode(SurfaceMode.LQ_ONLY);
+        if (surfaceCapturer != null) {
+            surfaceCapturer.setSurfaceMode(SurfaceMode.LQ_ONLY);
+            if (streaming && webrtcConfig.streamConfig.res != null) {
+                surfaceCapturer.changeCaptureFormat(
+                        webrtcConfig.streamConfig.res.getWidth(),
+                        webrtcConfig.streamConfig.res.getHeight(),
+                        webrtcConfig.streamConfig.fpsRange.getUpper()
+                );
+            } else {
+                stopCapturer();
+            }
+        }
 
-        stopCapturer();
         if (recorder != null) {
             recorder.close();
             recorder = null;
         }
-        stopStream();
     }
 
 
     @Override
     public void SetRecordingResolution(int width, int height, int fps) {
         if (IsRecording()) throw new IllegalStateException("Can't Recording Active");
+        Range<Integer> fpsRange = getOptimalFpsRange(context,webrtcConfig.cameraId,fps);
+        if (!checkForExactSupportedResolution(
+                context,
+                webrtcConfig.cameraId,
+                width,
+                height,
+                fpsRange
+        )) {
+            throw new IllegalStateException("Resolution not supported by camera");
+        }
+        webrtcConfig.recordConfig.res =new Size(width, height);
+        webrtcConfig.recordConfig.fpsRange = fpsRange;
     }
 
     @Override
     public void SetRecordingBitrate(int bitrate) {
-        if (IsRecording()) throw new IllegalStateException("Can't Recording Active");
+        webrtcConfig.recordConfig.bitrate = bitrate;
     }
 
     @Override
     public boolean IsRecording() {
-        return false;
+        return recorder != null;
     }
 
     @Override
     public void StopRecording() {
-        throw new UnsupportedOperationException("Use H264Media for local recording");
+        stopRecorder();
     }
 
 
@@ -294,14 +320,28 @@ public class WebRtcMedia implements Media {
             throw new IllegalArgumentException("Invalid camId: " + camId);
         }
 
-        boolean wasStreaming = streaming;
-        stopStream();
+        String newCameraId = cameraIds[camId];
 
-        webrtcConfig.cameraId = cameraIds[camId];
+        if (streaming) {
+            if (webrtcConfig.streamConfig.res == null) throw new IllegalStateException("Stream resolution not set");
+            if (!checkForExactSupportedResolution(
+                    context,
+                    newCameraId,
+                    webrtcConfig.streamConfig.res.getWidth(),
+                    webrtcConfig.streamConfig.res.getHeight(),
+                    webrtcConfig.streamConfig.fpsRange
+            )) {
+                throw new IllegalStateException("Resolution not supported by camera");
+            }
 
-        if (wasStreaming) {
-            StartStream();
+            surfaceCapturer.switchCamera(
+                    newCameraId,
+                    webrtcConfig.streamConfig.res.getWidth(),
+                    webrtcConfig.streamConfig.res.getHeight()
+            );
         }
+
+        webrtcConfig.cameraId = newCameraId;
     }
 
     @Override
@@ -327,7 +367,7 @@ public class WebRtcMedia implements Media {
     /** Toggle microphone mute. */
     public synchronized void AudioMute(boolean mute) {
         if (peerConnection != null) {
-            peerConnection.setAudioEnabled(mute);
+            peerConnection.setAudioEnabled(!mute);
         }
     }
 
@@ -465,6 +505,8 @@ public class WebRtcMedia implements Media {
             root.put(CMD,   WEBRTC_ICE);
             root.put(CMD_ID, 0);
             root.put(DATA,    data);
+
+            Log.d(TAG, "ICE GENERATED");
 
             connectionManager.send(root);
         } catch (Exception e) {

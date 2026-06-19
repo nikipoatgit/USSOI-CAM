@@ -3,6 +3,7 @@ package com.github.nikipo.ussoi.media.hfh264;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.hardware.camera2.*;
+import android.hardware.camera2.params.StreamConfigurationMap;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
@@ -11,9 +12,8 @@ import android.util.Size;
 import android.view.Surface;
 import androidx.annotation.NonNull;
 
-import com.github.nikipo.ussoi.media.utility.HFCameraHelper;
-
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class HFCameraController {
@@ -21,17 +21,41 @@ public class HFCameraController {
 
     private final CameraManager cameraManager;
     private final String cameraId;
+    private final StreamConfigurationMap streamConfigMap;
+
     private CameraDevice cameraDevice;
-    private CameraCaptureSession highSpeedSession;
-    private Surface currentSurface;
+    private CameraConstrainedHighSpeedCaptureSession highSpeedSession;
+    private Surface previewSurface;
+    private Surface encoderSurface;
     private HandlerThread cameraThread;
     private Handler cameraHandler;
     private Size captureSize;
     private Range<Integer> targetFps;
 
-    public HFCameraController(Context context, String cameraId) {
+    public HFCameraController(Context context, String cameraId) throws CameraAccessException {
         this.cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
         this.cameraId = cameraId;
+
+        CameraCharacteristics chars = cameraManager.getCameraCharacteristics(cameraId);
+        int[] caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+        boolean supportsHighSpeed = false;
+        if (caps != null) {
+            for (int c : caps) {
+                if (c == CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_CONSTRAINED_HIGH_SPEED_VIDEO) {
+                    supportsHighSpeed = true;
+                    break;
+                }
+            }
+        }
+        if (!supportsHighSpeed) {
+            throw new IllegalStateException("Camera " + cameraId + " does not support CONSTRAINED_HIGH_SPEED_VIDEO");
+        }
+
+        this.streamConfigMap = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+        if (this.streamConfigMap == null) {
+            throw new IllegalStateException("No StreamConfigurationMap for camera " + cameraId);
+        }
+
         startBackgroundThread();
     }
 
@@ -47,9 +71,7 @@ public class HFCameraController {
             @Override
             public void onOpened(@NonNull CameraDevice camera) {
                 cameraDevice = camera;
-                if (currentSurface != null) {
-                    startHighSpeedSession();
-                }
+                maybeStartSession();
             }
 
             @Override
@@ -66,28 +88,67 @@ public class HFCameraController {
     }
 
     public void setConfig(Size size, Range<Integer> fps) {
-        Log.d(TAG, "setConfig() called with: size = [" + size + "], fps = [" + fps + "]");
+        Size[] highSpeedSizes = streamConfigMap.getHighSpeedVideoSizes();
+        boolean sizeSupported = false;
+        for (Size s : highSpeedSizes) {
+            if (s.equals(size)) {
+                sizeSupported = true;
+                break;
+            }
+        }
+        if (!sizeSupported) {
+            throw new IllegalArgumentException("Size " + size + " not in supported high-speed sizes: " + Arrays.toString(highSpeedSizes));
+        }
+
+        Range<Integer>[] fpsRangesForSize = streamConfigMap.getHighSpeedVideoFpsRangesFor(size);
+        boolean fpsSupported = false;
+        for (Range<Integer> r : fpsRangesForSize) {
+            if (r.equals(fps)) {
+                fpsSupported = true;
+                break;
+            }
+        }
+        if (!fpsSupported) {
+            throw new IllegalArgumentException("FPS range " + fps + " not supported for size " + size + ". Supported: " + Arrays.toString(fpsRangesForSize));
+        }
 
         this.captureSize = size;
         this.targetFps = fps;
 
-        Log.d(TAG, "setConfig() successfully applied. Capture size set to "
-                + (this.captureSize != null ? this.captureSize.toString() : "null")
-                + " and FPS range set to " + this.targetFps);
+        Log.d(TAG, "setConfig() size=" + size + " fps=" + fps);
     }
 
-    public void updateCameraSurface(Surface newSurface) {
+    public void updatePreviewSurface(Surface surface) {
         cameraHandler.post(() -> {
-            if (newSurface == currentSurface) return;
-            this.currentSurface = newSurface;
-            if (cameraDevice != null) {
-                startHighSpeedSession();
-            }
+            if (surface == previewSurface) return;
+            previewSurface = surface;
+            maybeStartSession();
         });
     }
 
+    public void updateEncoderSurface(Surface surface) {
+        cameraHandler.post(() -> {
+            if (surface == encoderSurface) return;
+            encoderSurface = surface;
+            maybeStartSession();
+        });
+    }
+
+    private void maybeStartSession() {
+        if (cameraDevice == null) return;
+        if (captureSize == null || targetFps == null) return;
+        if (previewSurface == null && encoderSurface == null) return;
+        startHighSpeedSession();
+    }
+
     private void startHighSpeedSession() {
-        if (cameraDevice == null || currentSurface == null) return;
+        if (cameraDevice == null) return;
+
+        List<Surface> outputs = new ArrayList<>(2);
+        if (previewSurface != null) outputs.add(previewSurface);
+        if (encoderSurface != null) outputs.add(encoderSurface);
+
+        if (outputs.isEmpty() || outputs.size() > 2) return;
 
         try {
             if (highSpeedSession != null) {
@@ -95,25 +156,11 @@ public class HFCameraController {
                 highSpeedSession = null;
             }
 
-            List<Surface> outputs = Collections.singletonList(currentSurface);
             cameraDevice.createConstrainedHighSpeedCaptureSession(outputs, new CameraCaptureSession.StateCallback() {
                 @Override
                 public void onConfigured(@NonNull CameraCaptureSession session) {
-                    highSpeedSession = session;
-                    try {
-                        CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
-                        builder.addTarget(currentSurface);
-
-
-                        builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, targetFps);
-
-                        List<CaptureRequest> highSpeedRequests = ((CameraConstrainedHighSpeedCaptureSession) highSpeedSession)
-                                .createHighSpeedRequestList(builder.build());
-
-                        highSpeedSession.setRepeatingBurst(highSpeedRequests, null, cameraHandler);
-                    } catch (CameraAccessException | IllegalArgumentException e) {
-                        Log.e(TAG, "Failed starting high speed burst requests", e);
-                    }
+                    highSpeedSession = (CameraConstrainedHighSpeedCaptureSession) session;
+                    startRepeatingBurst(outputs);
                 }
 
                 @Override
@@ -123,7 +170,22 @@ public class HFCameraController {
             }, cameraHandler);
 
         } catch (CameraAccessException e) {
-            Log.e(TAG, "Error generating dynamic high speed session", e);
+            Log.e(TAG, "Error creating high speed session", e);
+        }
+    }
+
+    private void startRepeatingBurst(List<Surface> outputs) {
+        try {
+            CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+            for (Surface s : outputs) {
+                builder.addTarget(s);
+            }
+            builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, targetFps);
+
+            List<CaptureRequest> highSpeedRequests = highSpeedSession.createHighSpeedRequestList(builder.build());
+            highSpeedSession.setRepeatingBurst(highSpeedRequests, null, cameraHandler);
+        } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
+            Log.e(TAG, "Failed starting high speed burst requests", e);
         }
     }
 

@@ -5,6 +5,7 @@ import static com.github.nikipo.ussoi.media.utility.CameraHelper.getOptimalFpsRa
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_Session_KEY;
 import static com.github.nikipo.ussoi.storage.SaveInputFields.KEY_stream_api_path;
 import static com.github.nikipo.ussoi.ui.UssoiStrings.ERROR;
+import static com.github.nikipo.ussoi.ui.UssoiStrings.STREAM_H264;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -349,18 +350,6 @@ public class H264Media implements Media {
     private void startEncoder(){
         streamEncoder = new StreamingEncoder();
         try {
-
-//            Log.d(
-//                    TAG,
-//                    String.format(
-//                            "Encoder config: %dx%d @ %dfps, bitrate=%d",
-//                            h264Config.streamConfig.res.getWidth(),
-//                            h264Config.streamConfig.res.getHeight(),
-//                            h264Config.streamConfig.fpsRange.getUpper(),
-//                            h264Config.streamConfig.bitrate
-//                    )
-//            );
-
             LQSurface = streamEncoder.prepare(
                     h264Config.streamConfig.res.getWidth(),
                     h264Config.streamConfig.res.getHeight(),
@@ -429,7 +418,7 @@ public class H264Media implements Media {
 
     private void startRecorder(){
         if (recorder != null) throw new IllegalStateException("Recording Already Active");
-        recorder = new LocalRecorder(context);
+        recorder = new LocalRecorder(context,STREAM_H264);
         try {
             HQSurface = recorder.prepare(
                     h264Config.recordingConfig.res.getWidth(),
