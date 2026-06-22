@@ -92,7 +92,7 @@
             android:foregroundServiceType="camera|dataSync|connectedDevice|location" />
 
         <receiver
-            android:name=".hardware.usb.UsbAttachReceiver"
+            android:name=".tunnel.hardware.usb.UsbAttachReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />

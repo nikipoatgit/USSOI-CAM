@@ -78,68 +78,74 @@ public class Router{
 
 
     public void route(JSONObject json) {
-        Log.d(TAG,json.toString());
-        String cmd   = json.optString(CMD, EMPTY);
+
+        Log.d(TAG, json.toString());
+        String cmd = json.optString(CMD, EMPTY);
         String cmdId = json.optString(CMD_ID, EMPTY);
 
-        switch (cmd) {
-            case GET_PARAMS:
-                sendParams();
-                break;
+        try {
 
-            case SET_PARAMS:
-                setParams(json);
-                break;
+            switch (cmd) {
+                case GET_PARAMS:
+                    sendParams();
+                    break;
 
-            case GET_RES:
-                sendResponse(connectionManager,CMD_ID,GET_RES,camRes);
-                break;
+                case SET_PARAMS:
+                    setParams(json);
+                    break;
 
-            case GET_TUNNELS:
-                sendResponse(connectionManager,CMD_ID,GET_TUNNELS,tunnelRoute.getTunnels());
-                break;
+                case GET_RES:
+                    sendResponse(connectionManager, CMD_ID, GET_RES, camRes);
+                    break;
 
-            case START_TUNNEL:
-            case STOP_TUNNEL:
-                tunnelRoute.route(json);
-                break;
+                case GET_TUNNELS:
+                    sendResponse(connectionManager, CMD_ID, GET_TUNNELS, tunnelRoute.getTunnels());
+                    break;
 
-            case DEVICE_INFO:
-                sendResponse(connectionManager,cmdId,cmd, deviceInfoDynamic.buildJsonPacket());
-                break;
+                case START_TUNNEL:
+                case STOP_TUNNEL:
+                    tunnelRoute.route(json);
+                    break;
 
-            case DEVICE_IDENTITY:
-                sendResponse(connectionManager,cmdId,cmd, deviceInfoStatic.getAll());
-                break;
+                case DEVICE_INFO:
+                    sendResponse(connectionManager, cmdId, cmd, deviceInfoDynamic.buildJsonPacket());
+                    break;
 
-            //Stop commands no paramsSet guard
-            case STOP_STREAM:
-            case STOP_RECORDING:
-                streamRoute.route(json);
-                break;
+                case DEVICE_IDENTITY:
+                    sendResponse(connectionManager, cmdId, cmd, deviceInfoStatic.getAll());
+                    break;
 
-            case START_RECORDING:
-            case START_STREAM:
-            case PLAY:
-            case PAUSE:
-            case MUTE:
-            case FLIP:
-            case ROTATE:
-            case SWITCH:
-            case SET_RECORD_RES:
-            case SET_STREAM_RES:
-            case WEBRTC_ICE:
-            case WEBRTC_SDP:
-                if (!is_params_set) {
-                    sendError(connectionManager, cmdId, cmd, "Params not set");
-                    return;
-                }
-                streamRoute.route(json);
-                break;
+                //Stop commands no paramsSet guard
+                case STOP_STREAM:
+                case STOP_RECORDING:
+                    streamRoute.route(json);
+                    break;
 
-            default:
-                sendError(connectionManager, cmdId, cmd, "Unknown command");
-                break;
+                case START_RECORDING:
+                case START_STREAM:
+                case PLAY:
+                case PAUSE:
+                case MUTE:
+                case FLIP:
+                case ROTATE:
+                case SWITCH:
+                case SET_RECORD_RES:
+                case SET_STREAM_RES:
+                case WEBRTC_ICE:
+                case WEBRTC_SDP:
+                    if (!is_params_set) {
+                        sendError(connectionManager, cmdId, cmd, "Params not set");
+                        return;
+                    }
+                    streamRoute.route(json);
+                    break;
+
+                default:
+                    sendError(connectionManager, cmdId, cmd, "Unknown command");
+                    break;
+            }
+        } catch (Exception e) {
+            sendError(connectionManager,cmdId,cmd,e.getMessage());
         }
     }
 
@@ -191,7 +197,7 @@ public class Router{
                 sendError(connectionManager, cmdId, SET_PARAMS, reason);
                 return;
             }
-            streamRoute.closeStream();
+            streamRoute.close();
         }
 
         streamRoute = new StreamRoute(connectionManager, this, context, streamMode);
@@ -228,7 +234,7 @@ public class Router{
             res.put(TYPE, RESPONSE);
             res.put(CMD, cmd);
             res.put(CMD_ID, cmdId);
-            res.put(STATUS, STATUS_OK);
+//            res.put(STATUS, STATUS_OK);
             if (data != null){
                 res.put(DATA, data);
             }
@@ -254,9 +260,9 @@ public class Router{
     }
 
 
-    public void stop() {
-        if (tunnelRoute != null) tunnelRoute.stopTunnel();
-        if (streamRoute != null) streamRoute.closeStream();
+    public void close() {
+        if (tunnelRoute != null) tunnelRoute.close();
+        if (streamRoute != null) streamRoute.close();
     }
 
     public char getTunnelAndStreamStatus() {

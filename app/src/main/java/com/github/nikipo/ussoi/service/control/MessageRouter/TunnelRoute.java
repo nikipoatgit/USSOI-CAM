@@ -11,11 +11,10 @@ import android.util.Log;
 
 import com.github.nikipo.ussoi.service.control.ConnectionManager;
 import com.github.nikipo.ussoi.storage.SaveInputFields;
-import com.github.nikipo.ussoi.tunnel.bt.BluetoothHandler;
 import com.github.nikipo.ussoi.tunnel.Tunnel;
-import com.github.nikipo.ussoi.tunnel.usb.UsbHandler;
+import com.github.nikipo.ussoi.tunnel.BluetoothHandler;
+import com.github.nikipo.ussoi.tunnel.UsbHandler;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -69,6 +68,8 @@ public class TunnelRoute  {
             tunnels.add(new Tunnel() {
                 @Override public void init()               {}
                 @Override public void close()              {}
+                @Override public void Start() {}
+                @Override  public void Stop() {}
                 @Override public boolean isTunnelRunning() { return false; }
                 @Override public String getTunnelName()    { return EMPTY; }
             });
@@ -78,60 +79,81 @@ public class TunnelRoute  {
 
     private void initBtTunnels(Context ctx) {
         for (BluetoothDevice bt : selectedBtDevices) {
-            BluetoothHandler handler = new BluetoothHandler(ctx);
-            handler.setDevice(bt);
+            BluetoothHandler handler = new BluetoothHandler(ctx, bt);
             tunnels.add(handler);
         }
     }
 
-    // TODO implement this
-    private void initUsbTunnels(Context ctx) {
-        for (BluetoothDevice bt : selectedBtDevices) {
-            BluetoothHandler handler = new BluetoothHandler(ctx);
-            handler.setDevice(bt);
-            tunnels.add(handler);
-        }
-    }
 
     public void route(JSONObject json) {
         String cmd        = json.optString(CMD,        EMPTY);
         String cmdId      = json.optString(CMD_ID,      EMPTY);
-        String tunnelName = json.optString(TUNNEL_NAME, EMPTY);
+
+        JSONObject param = json.optJSONObject("param");
+        String tunnelName = param != null ? param.optString("name") : null;
+
         try {
+            //{"cmd":"start_tunnel","param":{"name":"BT200:21:13:00:35:41"},"cmdId":"c1782107969500_6"}
+
             switch (cmd) {
-                case START_TUNNEL: {
+                case START_TUNNEL : {
                     if (startTunnel(tunnelName)) {
-                        router.sendResponse(connectionManager, cmd,cmdId,null );
+                        router.sendResponse(connectionManager, cmd, cmdId, null);
                     } else {
-                        router.sendError(connectionManager, cmdId, cmd,"Tunnel '" + tunnelName + "' not found");
+                        throw new IllegalStateException("Tunnel " + tunnelName + "not found");
                     }
                     break;
                 }
-                case STOP_TUNNEL: {
+                case STOP_TUNNEL : {
                     if (stopTunnel(tunnelName)) {
-                        router.sendResponse(connectionManager, cmd,cmdId, null);
+                        router.sendResponse(connectionManager, cmd, cmdId, null);
                     } else {
-                        router.sendError(connectionManager, cmdId, cmd,"Tunnel '" + tunnelName + "' not found");
+                        throw new IllegalStateException("Tunnel " + tunnelName + "not found");
                     }
                     break;
                 }
-
-                default:
-                    router.sendError(connectionManager, cmdId, cmd, "Unknown tunnel command: " + cmd);
-                    break;
+                default :  throw new IllegalStateException("Unknown command");
             }
-
         } catch (Exception e) {
-            // LOG TODO
-            e.printStackTrace();
+            throw new IllegalStateException(e.getMessage());
         }
     }
 
     private Tunnel findTunnel(String name) {
-        if (name == null || name.isEmpty()) return null;
-        for (Tunnel t : tunnels) {
-            if (t != null && name.equals(t.getTunnelName())) return t;
+        Log.d(TAG, "findTunnel() called, requested=" + name);
+
+        if (name == null || name.isEmpty()) {
+            Log.w(TAG, "findTunnel(): tunnel name is null/empty");
+            return null;
         }
+
+        for (Tunnel t : tunnels) {
+            if (t == null) {
+                Log.w(TAG, "findTunnel(): encountered null tunnel");
+                continue;
+            }
+
+            String currentName = t.getTunnelName();
+
+            Log.d(TAG, "findTunnel(): checking tunnel=" + currentName);
+
+            if (name.equals(currentName)) {
+                Log.d(TAG, "findTunnel(): match found -> " + currentName);
+                return t;
+            }
+        }
+
+        Log.e(TAG, "findTunnel(): tunnel not found -> " + name);
+
+        StringBuilder available = new StringBuilder();
+        for (Tunnel t : tunnels) {
+            if (t != null) {
+                available.append(t.getTunnelName()).append(", ");
+            }
+        }
+
+        Log.e(TAG, "Available tunnels: " + available);
+
         return null;
     }
 
@@ -139,9 +161,8 @@ public class TunnelRoute  {
         Tunnel t = findTunnel(tunnelName);
         if (t == null) return false;
         try {
-            // only init tunnel if not running
             if(!t.isTunnelRunning()){
-                t.init();
+                t.Start();;
             }
             return true;
         } catch (Exception e) {
@@ -158,32 +179,29 @@ public class TunnelRoute  {
             t.close();
             return true;
         } catch (Exception e) {
-            Log.e(TAG, "stopTunnel failed: " + tunnelName, e);
-            return false;
+            throw new IllegalStateException(tunnelName + e.getMessage());
         }
     }
 
     public JSONObject getTunnels() {
-        JSONObject root = new JSONObject();
-        JSONArray tunnelsArray = new JSONArray();
+        JSONObject data = new JSONObject();
 
         for (Tunnel t : tunnels) {
             if (t == null) continue;
 
             String name = t.getTunnelName();
+            boolean status = t.isTunnelRunning();
+
             if (name == null || name.isEmpty()) continue;
 
-            tunnelsArray.put(name);
+            try {
+                data.put(name, status);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
 
-        try {
-            root.put("tunnels", tunnelsArray);
-        }
-        catch (Exception e){
-            e.printStackTrace();
-            return null;
-        }
-        return root;
+        return data;
     }
 
     public boolean isTunnelRunning() {
@@ -195,7 +213,7 @@ public class TunnelRoute  {
     }
 
 
-    public void stopTunnel() {
+    public void close() {
         for (Tunnel t : tunnels) {
             try {
                 if (t != null) t.close();

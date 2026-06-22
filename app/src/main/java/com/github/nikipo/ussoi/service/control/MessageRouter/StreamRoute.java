@@ -150,7 +150,7 @@ public class StreamRoute  {
         }
     }
 
-    public void closeStream()    { media.close(); }
+    public void close()    { media.close(); }
     public boolean isStreaming()  { return media.IsStreaming(); }
     public boolean isRecording()  { return media.IsRecording(); }
 

@@ -19,6 +19,8 @@ package com.github.nikipo.ussoi.tunnel;
 public interface Tunnel {
     void init();
     void close();
+    void Start();
+    void Stop();
     boolean isTunnelRunning();
     String getTunnelName();
 }

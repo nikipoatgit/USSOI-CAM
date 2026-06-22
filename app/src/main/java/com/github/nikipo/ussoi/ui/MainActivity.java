@@ -34,9 +34,9 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.media3.common.util.UnstableApi;
 
-import com.github.nikipo.ussoi.hardware.bluetooth.BluetoothController;
-import com.github.nikipo.ussoi.hardware.usb.UsbDeviceMonitor;
-import com.github.nikipo.ussoi.hardware.usb.UsbDriverController;
+import com.github.nikipo.ussoi.tunnel.hardware.bluetooth.BluetoothController;
+import com.github.nikipo.ussoi.tunnel.hardware.usb.UsbDeviceMonitor;
+import com.github.nikipo.ussoi.tunnel.hardware.usb.UsbDriverController;
 import com.github.nikipo.ussoi.network.update.VersionChecker;
 import com.github.nikipo.ussoi.storage.StorageController;
 import com.github.nikipo.ussoi.storage.logs.Logging;

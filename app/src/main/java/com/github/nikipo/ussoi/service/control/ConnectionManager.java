@@ -132,7 +132,7 @@ public class ConnectionManager {
             sysTelemetry.close();
         }
 
-        router.stop();
+        router.close();
     }
 
     // issue if

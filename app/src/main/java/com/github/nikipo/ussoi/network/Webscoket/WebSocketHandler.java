@@ -140,13 +140,23 @@ public class WebSocketHandler {
             }
 
             @Override
-            public void onClosed(@NonNull WebSocket webSocket, int code, @NonNull String reason) {
+            public void onClosed(@NonNull WebSocket webSocket,
+                                 int code,
+                                 @NonNull String reason) {
+
                 isConnected = false;
-                Log.d(TAG, "WebSocket closed: " + reason);
+
+                Log.d(TAG, "WebSocket closed: code=" + code + " reason=" + reason);
+
                 if (logging != null) {
-                    logging.log("WS Closed: " + reason);
+                    logging.log("WS Closed: code=" + code + " reason=" + reason);
                 }
+
                 mainHandler.post(callback::onClosed);
+
+                if (!isManualClose) {
+                    initiateReconnect();
+                }
             }
         });
     }
@@ -228,4 +238,7 @@ public class WebSocketHandler {
     public boolean isConnected() {
         return isConnected;
     }
+
+
+
 }
