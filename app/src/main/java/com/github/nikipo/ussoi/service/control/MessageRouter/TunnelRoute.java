@@ -55,6 +55,12 @@ public class TunnelRoute  {
         this.connectionManager = connectionManager;
         preferences = SaveInputFields.getInstance(ctx).get_shared_pref();
         selectedBtDevices = SaveInputFields.selectedBtDevices;
+
+        for (BluetoothDevice device : SaveInputFields.selectedBtDevices) {
+            Log.d(TAG, "Name: " + device.getName() +
+                    ", MAC: " + device.getAddress());
+        }
+
         useBT  = preferences.getBoolean(KEY_BT_SWITCH, false);
         useUSB = preferences.getBoolean(KEY_USB_Switch, false);
 
